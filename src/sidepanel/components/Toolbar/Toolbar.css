@@ -1,0 +1,75 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.record-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: 0.04em;
+}
+.record-btn:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  color: var(--text-primary);
+  background: var(--primary-dim);
+}
+.record-btn.recording {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.35);
+  color: var(--danger);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.2);
+}
+
+.record-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.record-btn.recording .record-dot {
+  background: var(--danger);
+}
+
+.btn-icon.icon-active {
+  color: var(--primary-hover);
+  background: var(--primary-dim);
+}
+
+.volume-container {
+  height: 6px;
+  width: 50px;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-left: 8px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+.volume-container.active {
+  opacity: 1;
+  visibility: visible;
+}
+.volume-bar {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--primary-hover) 100%);
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform 0.05s ease-out;
+}

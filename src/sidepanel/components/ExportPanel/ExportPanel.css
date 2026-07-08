@@ -1,0 +1,97 @@
+.export-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Stats row */
+.export-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 6px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.stat-icon  { font-size: 18px; }
+.stat-value { font-size: 20px; font-weight: 700; color: var(--text-primary); line-height: 1; }
+.stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+
+/* Section */
+.export-section { display: flex; flex-direction: column; gap: 8px; }
+.export-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+/* Info rows */
+.export-info-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.info-label { color: var(--text-muted); flex-shrink: 0; width: 52px; }
+.info-value { color: var(--text-primary); }
+.info-link  { color: var(--primary-hover); text-decoration: none; font-size: 11px; }
+.info-link:hover { text-decoration: underline; }
+
+/* Export cards */
+.export-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition);
+}
+.export-card:hover { border-color: var(--border-active); }
+.export-card-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.export-card-icon { font-size: 20px; flex-shrink: 0; }
+.export-card-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.export-card-desc { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+.btn-active {
+  background: var(--primary-dim) !important;
+  border-color: var(--border-active) !important;
+  color: var(--primary-hover) !important;
+}
+
+/* Preview */
+.export-preview {
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
