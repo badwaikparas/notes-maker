@@ -22,6 +22,7 @@ export default function Toolbar({ showToast }) {
   const analyserRef    = useRef(null)
   const animFrameRef   = useRef(null)
   const volumeBarRef   = useRef(null)
+  const wsRef          = useRef(null)
 
   // ── Poll content script for video time while transcription is active ────
   useEffect(() => {
@@ -46,12 +47,10 @@ export default function Toolbar({ showToast }) {
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
     analyserRef.current.getByteFrequencyData(dataArray)
     
-    // Calculate average volume
     let sum = 0
     for (let i = 0; i < dataArray.length; i++) { sum += dataArray[i] }
     const average = sum / dataArray.length
     
-    // Map average (0-255) to a scale (0-1) with a slight boost
     const volume = Math.min(1, average / 60) 
     
     volumeBarRef.current.style.transform = `scaleX(${volume})`
@@ -67,87 +66,96 @@ export default function Toolbar({ showToast }) {
     if (volumeBarRef.current) { volumeBarRef.current.style.transform = 'scaleX(0)' }
   }
 
-  // ── Web Speech API ───────────────────────────────────────────────────────
+  // ── Local Python Server WebSocket Logic ──────────────────────────────────
   async function startSpeechRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setTranscriptionError('Speech Recognition not supported in this browser.')
-      return
-    }
-
     try {
-      // 1. Get the stream and keep it to measure volume
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // 1. Prompt user to share the tab (like Google Meet)
+      // preferCurrentTab makes it default to the tab they are currently looking at.
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "browser" },
+        audio: true,
+        preferCurrentTab: true
+      })
+      
+      // If the user forgot to check "Share audio", throw an error
+      if (stream.getAudioTracks().length === 0) {
+        stream.getTracks().forEach(t => t.stop())
+        throw new Error("You must check 'Share tab audio' in the prompt!")
+      }
+
       streamRef.current = stream
 
-      // 2. Set up AudioContext & Analyser
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      // 2. Set up AudioContext locked to 16,000 Hz for Whisper compatibility
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 })
+      
+      // 3. Set up Volume Analyser
       const analyser = audioCtx.createAnalyser()
       analyser.fftSize = 256
-      
       const source = audioCtx.createMediaStreamSource(stream)
+      
       source.connect(analyser)
       
       audioCtxRef.current = audioCtx
       analyserRef.current = analyser
       updateVolumeMeter()
-      
-    } catch (err) {
-      if (err.name === 'NotAllowedError') {
-        setTranscriptionError('Microphone access denied. Opening setup page...')
-        chrome.tabs.create({ url: chrome.runtime.getURL('setup.html') })
-      } else {
-        setTranscriptionError(`Microphone error: ${err.message}`)
+
+      // 4. Connect to local Python server
+      const ws = new WebSocket('ws://127.0.0.1:5000/ws')
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setTranscriptionActive(true)
+        showToast('🎙️ Connected to local Whisper server!')
       }
-      return
-    }
 
-    const recognition = new SpeechRecognition()
-    recognition.continuous      = true
-    recognition.interimResults  = true
-    recognition.lang            = settings.language || 'en-US'
-    recognition.maxAlternatives = 1
-    recognitionRef.current      = recognition
-
-    recognition.onresult = (event) => {
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i]
-        if (result.isFinal) {
-          addTranscriptBlock(result[0].transcript, videoTimeRef.current)
-        } else {
-          interim += result[0].transcript
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+        if (data.type === 'interim') {
+          setInterimText(data.text)
+        } else if (data.type === 'final') {
+          setInterimText('')
+          addTranscriptBlock(data.text, videoTimeRef.current)
         }
       }
-      setInterimText(interim)
-    }
 
-    recognition.onerror = (event) => {
-      if (event.error === 'no-speech') return
-      if (event.error === 'aborted') return
-      console.error('[NotesMaker] SpeechRecognition error:', event.error)
-      setTranscriptionError(`Mic error: ${event.error}`)
-      restartRef.current = false
-      cleanupAudio()
-    }
-
-    recognition.onend = () => {
-      setInterimText('')
-      if (restartRef.current) {
-        try { recognition.start() } catch (_) {}
-      } else {
-        cleanupAudio()
+      ws.onerror = () => {
+        setTranscriptionError('Could not connect to Python server at 127.0.0.1:5000. Is it running?')
+        stopSpeechRecognition()
       }
-    }
 
-    restartRef.current = true
-    recognition.start()
-    setTranscriptionActive(true)
+      ws.onclose = () => {
+        if (transcription.isActive) {
+          stopSpeechRecognition()
+        }
+      }
+
+      // 5. Stream raw audio to server
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1)
+      processor.onaudioprocess = (e) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          const float32 = e.inputBuffer.getChannelData(0)
+          ws.send(float32.buffer)
+        }
+      }
+
+      source.connect(processor)
+      const dummyGain = audioCtx.createGain()
+      dummyGain.gain.value = 0
+      processor.connect(dummyGain)
+      dummyGain.connect(audioCtx.destination)
+
+    } catch (err) {
+      console.error(err)
+      setTranscriptionError(`Failed to capture tab audio: ${err.message}`)
+      return
+    }
   }
 
   function stopSpeechRecognition() {
-    restartRef.current = false
-    recognitionRef.current?.stop()
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
     setTranscriptionActive(false)
     setInterimText('')
     cleanupAudio()
