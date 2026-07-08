@@ -40,6 +40,7 @@
   "permissions": [
     "storage",
     "tabCapture",
+    "desktopCapture",
     "tabs",
     "sidePanel",
     "scripting",

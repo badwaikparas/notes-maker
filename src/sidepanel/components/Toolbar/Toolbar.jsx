@@ -23,6 +23,7 @@ export default function Toolbar({ showToast }) {
   const animFrameRef   = useRef(null)
   const volumeBarRef   = useRef(null)
   const wsRef          = useRef(null)
+  const connectionAttemptRef = useRef(0)
 
   // ── Poll content script for video time while transcription is active ────
   useEffect(() => {
@@ -68,13 +69,14 @@ export default function Toolbar({ showToast }) {
 
   // ── Local Python Server WebSocket Logic ──────────────────────────────────
   async function startSpeechRecognition() {
+    const currentAttempt = ++connectionAttemptRef.current
+
     try {
       // 1. Prompt user to share the tab (like Google Meet)
-      // preferCurrentTab makes it default to the tab they are currently looking at.
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "browser" },
-        audio: true,
-        preferCurrentTab: true
+        audio: true
+        // Note: Do NOT use preferCurrentTab: true in a Side Panel, as it restricts the list to the Side Panel itself!
       })
       
       // If the user forgot to check "Share audio", throw an error
@@ -82,6 +84,15 @@ export default function Toolbar({ showToast }) {
         stream.getTracks().forEach(t => t.stop())
         throw new Error("You must check 'Share tab audio' in the prompt!")
       }
+
+      // If the user clicked record again while this prompt was open, discard this stream.
+      if (currentAttempt !== connectionAttemptRef.current) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
+
+      // 2. Kill the video track instantly so we only keep audio and don't waste resources
+      stream.getVideoTracks().forEach(t => t.stop())
 
       streamRef.current = stream
 
@@ -146,12 +157,16 @@ export default function Toolbar({ showToast }) {
 
     } catch (err) {
       console.error(err)
-      setTranscriptionError(`Failed to capture tab audio: ${err.message}`)
+      // Only show error if this was the latest attempt
+      if (currentAttempt === connectionAttemptRef.current) {
+        setTranscriptionError(`Failed to capture tab audio: ${err.message}`)
+      }
       return
     }
   }
 
   function stopSpeechRecognition() {
+    connectionAttemptRef.current++ // cancel any pending requests
     if (wsRef.current) {
       wsRef.current.close()
       wsRef.current = null
@@ -167,7 +182,7 @@ export default function Toolbar({ showToast }) {
       showToast('⏹ Transcription stopped')
     } else {
       startSpeechRecognition()
-      showToast('🎙️ Transcription started')
+      // Toast and active state will be handled by ws.onopen
     }
   }
 
