@@ -26,7 +26,7 @@ export default function ExportPanel({ showToast }) {
     if (notesBlocks.length === 0) { showToast('⚠️ No notes to export'); return }
     setDownloading(true)
     try {
-      await downloadNotesZip(session, notesBlocks, settings)
+      await downloadNotesZip(session, notesBlocks, settings, allBlocks)
       showToast('✅ ZIP downloaded!')
     } catch (e) {
       showToast('❌ Export failed')

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useNotesStore } from '../../store/useNotesStore'
 import './Settings.css'
 
@@ -16,6 +17,16 @@ const LANGUAGES = [
 export default function Settings() {
   const settings       = useNotesStore((s) => s.settings)
   const updateSettings = useNotesStore((s) => s.updateSettings)
+  const [currentShortcut, setCurrentShortcut] = useState('Ctrl+Shift+S')
+
+  useEffect(() => {
+    chrome.commands.getAll((commands) => {
+      const screenshotCommand = commands.find(c => c.name === 'take-screenshot')
+      if (screenshotCommand && screenshotCommand.shortcut) {
+        setCurrentShortcut(screenshotCommand.shortcut)
+      }
+    })
+  }, [])
 
   function toggle(key) {
     updateSettings({ [key]: !settings[key] })
@@ -56,9 +67,19 @@ export default function Settings() {
 
           <SettingRow
             label="Shortcut"
-            desc="Change this in chrome://extensions/shortcuts"
+            desc="Chrome requires this to be changed in settings"
           >
-            <kbd className="shortcut-badge">Ctrl+Shift+S</kbd>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <kbd className="shortcut-badge">{currentShortcut}</kbd>
+              <button 
+                className="btn-icon" 
+                title="Edit Shortcut" 
+                onClick={() => chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })}
+                style={{ fontSize: '14px', padding: '4px' }}
+              >
+                ✏️
+              </button>
+            </div>
           </SettingRow>
 
           <SettingRow

@@ -110,7 +110,13 @@ function NotesBlock({ block, toggleInNotes, deleteBlock }) {
           {block.timestamp !== null && (
             <span className="notes-ts">📸 {formatTime(block.timestamp)}</span>
           )}
-          <button className="btn-icon notes-block-del" onClick={() => deleteBlock(block.id)}>🗑️</button>
+          <button 
+            className="btn-icon notes-block-remove" 
+            onClick={() => toggleInNotes(block.id)}
+            title="Remove from notes"
+          >
+            ✕
+          </button>
         </div>
       </div>
     )

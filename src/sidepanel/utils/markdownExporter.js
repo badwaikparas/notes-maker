@@ -98,11 +98,22 @@ function dataUrlToUint8Array(dataUrl) {
  * @param {Array}  blocks    - all notesBlocks
  * @param {object} settings
  */
-export async function downloadNotesZip(session, blocks, settings) {
+export async function downloadNotesZip(session, blocks, settings, allBlocks = []) {
   const zip = new JSZip()
+  
+  // 1. Add notes.md
   const markdown = buildMarkdown(session, blocks, settings)
   zip.file('notes.md', markdown)
 
+  // 2. Add transcript.txt
+  if (allBlocks && allBlocks.length > 0) {
+    const transcriptText = buildTranscriptText(allBlocks)
+    if (transcriptText) {
+      zip.file('transcript.txt', transcriptText)
+    }
+  }
+
+  // 3. Add screenshots folder
   const screenshots = blocks.filter((b) => b.type === 'screenshot')
   if (screenshots.length > 0) {
     const assetsFolder = zip.folder('assets')

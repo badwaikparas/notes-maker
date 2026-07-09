@@ -140,6 +140,8 @@
 
 /* ── Inline screenshot ── */
 .inline-screenshot {
+  display: flex;
+  flex-direction: column;
   margin: 6px 14px 6px 26px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -150,6 +152,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
 }

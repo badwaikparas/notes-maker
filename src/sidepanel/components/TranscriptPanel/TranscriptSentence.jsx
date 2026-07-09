@@ -98,14 +98,24 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots, 
           <div className="inline-screenshot-header">
             <span className="inline-screenshot-label">
               📸 Screenshot {ss.timestamp !== null ? `· ${formatTime(ss.timestamp)}` : ''}
+              {ss.addedToNotes && <span className="in-notes-dot" title="In notes" style={{ display: 'inline-block', marginLeft: '6px', marginTop: 0, verticalAlign: 'middle' }} />}
             </span>
-            <button
-              className="btn-icon"
-              onClick={() => deleteBlock(ss.id)}
-              title="Delete screenshot"
-            >
-              🗑️
-            </button>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button
+                className="btn-icon"
+                title={ss.addedToNotes ? 'Remove from notes' : 'Add to notes'}
+                onClick={() => toggleInNotes(ss.id)}
+              >
+                {ss.addedToNotes ? '✅' : '📝'}
+              </button>
+              <button
+                className="btn-icon"
+                onClick={() => deleteBlock(ss.id)}
+                title="Delete screenshot"
+              >
+                🗑️
+              </button>
+            </div>
           </div>
           <img
             src={ss.imageDataUrl}
