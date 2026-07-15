@@ -3,45 +3,36 @@ import { useNotesStore } from '../../store/useNotesStore'
 import { formatTime } from '../../utils/markdownExporter'
 import './TranscriptPanel.css'
 
-export default function TranscriptSentence({ block, index, showToast }) {
-  const selectedIds    = useNotesStore((s) => s.selectedIds)
-  const toggleSelect   = useNotesStore((s) => s.toggleSelect)
-  const selectRange    = useNotesStore((s) => s.selectRange)
-  const toggleInNotes  = useNotesStore((s) => s.toggleInNotes)
-  const deleteBlock    = useNotesStore((s) => s.deleteBlock)
+export default function TranscriptSentence({ block, index, anchoredScreenshots = [], showToast }) {
+  const selectedIds  = useNotesStore((s) => s.selectedIds)
+  const toggleSelect = useNotesStore((s) => s.toggleSelect)
+  const selectRange  = useNotesStore((s) => s.selectRange)
+  const toggleInNotes= useNotesStore((s) => s.toggleInNotes)
+  const deleteBlock  = useNotesStore((s) => s.deleteBlock)
 
   const [hovered, setHovered]     = useState(false)
   const [copyFlash, setCopyFlash] = useState(false)
 
   const isSelected = selectedIds.has(block.id)
 
-  // ── Single click: copy sentence to clipboard ─────────────────────────────
   async function handleClick(e) {
-    if (e.shiftKey) {
-      // Shift+click → range select
-      selectRange(block.id)
-      return
-    }
-    // Normal click → copy
+    if (e.shiftKey) { selectRange(block.id); return }
     await navigator.clipboard.writeText(block.text)
     setCopyFlash(true)
     showToast('📋 Copied!')
     setTimeout(() => setCopyFlash(false), 1000)
   }
 
-  // ── Ctrl/Cmd+click: toggle checkbox selection ────────────────────────────
   function handleMouseDown(e) {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      toggleSelect(block.id)
-    }
+    if (e.ctrlKey || e.metaKey) { e.preventDefault(); toggleSelect(block.id) }
   }
 
   const ts = formatTime(block.timestamp)
+  // Show ✏️ badge if the block has a noteOverride in the Notes tab
+  const hasOverride = block.noteOverride != null
 
   return (
     <div className="sentence-group animate-fade-in">
-      {/* ── Transcript sentence row ── */}
       <div
         className={`sentence-row ${isSelected ? 'selected' : ''} ${copyFlash ? 'flash' : ''}`}
         onMouseEnter={() => setHovered(true)}
@@ -49,17 +40,15 @@ export default function TranscriptSentence({ block, index, showToast }) {
         onClick={handleClick}
         onMouseDown={handleMouseDown}
       >
-        {/* Timestamp badge */}
-        {ts && (
-          <span className="sentence-ts" title={`Video time: ${ts}`}>
-            {ts}
-          </span>
-        )}
+        {ts && <span className="sentence-ts" title={`Video time: ${ts}`}>{ts}</span>}
 
-        {/* Sentence text */}
-        <p className="sentence-text">{block.text}</p>
+        <p className="sentence-text">
+          {block.text}
+          {hasOverride && (
+            <span className="sentence-edited-badge" title="This sentence has a user-edited version in Notes">✏️</span>
+          )}
+        </p>
 
-        {/* Hover actions */}
         {hovered && (
           <div className="sentence-actions">
             <button
@@ -71,7 +60,7 @@ export default function TranscriptSentence({ block, index, showToast }) {
             </button>
             <button
               className="btn-icon"
-              title="Delete"
+              title="Delete sentence"
               onClick={(e) => { e.stopPropagation(); deleteBlock(block.id) }}
             >
               🗑️
@@ -79,16 +68,17 @@ export default function TranscriptSentence({ block, index, showToast }) {
           </div>
         )}
 
-        {/* In-notes indicator */}
-        {block.addedToNotes && (
-          <span className="in-notes-dot" title="In notes" />
-        )}
-
-        {/* Checkbox (ctrl+click) */}
-        {isSelected && (
-          <span className="sentence-checkbox">✓</span>
-        )}
+        {block.addedToNotes && <span className="in-notes-dot" title="In notes" />}
+        {isSelected && <span className="sentence-checkbox">✓</span>}
       </div>
+
+      {/* Inline screenshot thumbnails (only when enabled in Settings) */}
+      {anchoredScreenshots.map((ss) => (
+        <div key={ss.id} className="anchored-screenshot">
+          <img src={ss.imageDataUrl} alt="Screenshot" className="anchored-screenshot-img" />
+          {ss.caption && <span className="anchored-screenshot-caption">{ss.caption}</span>}
+        </div>
+      ))}
     </div>
   )
 }

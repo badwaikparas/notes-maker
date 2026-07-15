@@ -3,138 +3,138 @@ import { useNotesStore } from '../../store/useNotesStore'
 import { formatTime, buildMarkdown } from '../../utils/markdownExporter'
 import './NotesPreview.css'
 
-// Minimal markdown-to-HTML renderer (subset: headings, bold, italic, code, links, blockquotes, images)
-function renderInlineMarkdown(text) {
+// ── Minimal inline markdown renderer ────────────────────────────────────────
+function renderInline(text) {
   return text
-    // Bold
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // Italic
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // Inline code
     .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-    // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" class="md-link">$1</a>')
 }
 
 function MarkdownLine({ text }) {
-  // Headings
-  const h3 = text.match(/^### (.+)/)
-  if (h3) return <h3 className="md-h3" dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(h3[1]) }} />
-  const h2 = text.match(/^## (.+)/)
-  if (h2) return <h2 className="md-h2" dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(h2[1]) }} />
-  const h1 = text.match(/^# (.+)/)
-  if (h1) return <h1 className="md-h1" dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(h1[1]) }} />
-  // Blockquote (used for transcript timestamps)
-  const bq = text.match(/^> (.+)/)
-  if (bq) return <blockquote className="md-blockquote" dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(bq[1]) }} />
-  // Horizontal rule
+  const h3 = text.match(/^### (.+)/); if (h3) return <h3 className="md-h3" dangerouslySetInnerHTML={{ __html: renderInline(h3[1]) }} />
+  const h2 = text.match(/^## (.+)/);  if (h2) return <h2 className="md-h2" dangerouslySetInnerHTML={{ __html: renderInline(h2[1]) }} />
+  const h1 = text.match(/^# (.+)/);   if (h1) return <h1 className="md-h1" dangerouslySetInnerHTML={{ __html: renderInline(h1[1]) }} />
+  const bq = text.match(/^> (.+)/);   if (bq) return <blockquote className="md-blockquote" dangerouslySetInnerHTML={{ __html: renderInline(bq[1]) }} />
   if (text.match(/^---+$/)) return <hr className="md-hr" />
-  // Unordered list item
-  const li = text.match(/^[-*] (.+)/)
-  if (li) return <li className="md-li" dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(li[1]) }} />
-  // Empty line
-  if (text.trim() === '') return <div className="md-spacer" />
-  // Default paragraph
-  return <p className="md-p" dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(text) }} />
+  const li = text.match(/^[-*] (.+)/); if (li) return <li className="md-li" dangerouslySetInnerHTML={{ __html: renderInline(li[1]) }} />
+  if (!text.trim()) return <div className="md-spacer" />
+  return <p className="md-p" dangerouslySetInnerHTML={{ __html: renderInline(text) }} />
 }
 
-function NotesEditor({ text, onChange, onBlur }) {
+function AutoTextarea({ value, onChange, onBlur, onKeyDown }) {
   const ref = useRef(null)
-
   useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = 'auto'
-      ref.current.style.height = ref.current.scrollHeight + 'px'
-    }
-  }, [text])
-
+    if (ref.current) { ref.current.style.height = 'auto'; ref.current.style.height = ref.current.scrollHeight + 'px' }
+  }, [value])
   return (
     <textarea
       ref={ref}
       className="md-textarea"
-      value={text}
-      onChange={(e) => {
-        onChange(e.target.value)
-        e.target.style.height = 'auto'
-        e.target.style.height = e.target.scrollHeight + 'px'
-      }}
+      value={value}
+      onChange={(e) => { onChange(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px' }}
       onBlur={onBlur}
+      onKeyDown={onKeyDown}
       spellCheck
+      autoFocus
     />
   )
 }
 
+// ── Get the display text for a block in the notes view ──────────────────────
+function noteDisplayText(block) {
+  if (block.type === 'transcript') {
+    // Use the override if set, otherwise original text
+    const body = block.noteOverride ?? block.text
+    const ts = block.timestamp !== null ? `> [${formatTime(block.timestamp)}] ` : ''
+    return `${ts}${body}`
+  }
+  if (block.type === 'manual') return block.text || ''
+  return block.text || ''
+}
+
+// ── Get editable seed text (no timestamp prefix) ────────────────────────────
+function editSeedText(block) {
+  if (block.type === 'transcript') return block.noteOverride ?? block.text
+  return block.text || ''
+}
+
 export default function NotesPreview({ showToast }) {
-  const session           = useNotesStore((s) => s.session)
-  const blocks            = useNotesStore((s) => s.blocks)
-  const settings          = useNotesStore((s) => s.settings)
-  const toggleInNotes     = useNotesStore((s) => s.toggleInNotes)
-  const deleteBlock       = useNotesStore((s) => s.deleteBlock)
-  const updateBlockText   = useNotesStore((s) => s.updateBlockText)
+  const session               = useNotesStore((s) => s.session)
+  const blocks                = useNotesStore((s) => s.blocks)
+  const settings              = useNotesStore((s) => s.settings)
+  const toggleInNotes         = useNotesStore((s) => s.toggleInNotes)
+  const setNoteOverride       = useNotesStore((s) => s.setNoteOverride)
+  const clearNoteOverride     = useNotesStore((s) => s.clearNoteOverride)
   const addAllTranscriptToNotes = useNotesStore((s) => s.addAllTranscriptToNotes)
+  const exportMeta            = useNotesStore((s) => s.exportMeta)
 
-  const notesBlocks = blocks.filter((b) => b.addedToNotes)
+  const notesBlocks      = blocks.filter((b) => b.addedToNotes)
   const transcriptBlocks = blocks.filter((b) => b.type === 'transcript')
-  const hasNotes = notesBlocks.length > 0
-  const allTranscriptInNotes = transcriptBlocks.length > 0 &&
-    transcriptBlocks.every((b) => b.addedToNotes)
+  const hasNotes         = notesBlocks.length > 0
+  const allInNotes       = transcriptBlocks.length > 0 && transcriptBlocks.every((b) => b.addedToNotes)
 
-  // "preview mode" vs "edit mode" per block
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText]   = useState('')
-  const [viewMode, setViewMode]   = useState('rendered') // 'rendered' | 'raw'
+  const [viewMode, setViewMode]   = useState('rendered')
 
   function startEdit(block) {
     setEditingId(block.id)
-    const md = blockToMarkdownText(block)
-    setEditText(md)
+    setEditText(editSeedText(block))
   }
 
   function commitEdit() {
     if (editingId) {
-      updateBlockText(editingId, editText)
+      const trimmed = editText.trim()
+      // Find block to check type
+      const block = blocks.find((b) => b.id === editingId)
+      if (block?.type === 'transcript') {
+        // Only store override if it actually differs from original
+        if (trimmed && trimmed !== block.text) {
+          setNoteOverride(editingId, trimmed)
+        } else if (!trimmed || trimmed === block.text) {
+          clearNoteOverride(editingId)
+        }
+      } else {
+        setNoteOverride(editingId, trimmed || (block?.text ?? ''))
+      }
     }
     setEditingId(null)
     setEditText('')
   }
 
   async function handleCopyMarkdown() {
-    const md = buildMarkdown(session, notesBlocks, settings)
+    const md = buildMarkdown(session, notesBlocks, { ...settings, exportTags: exportMeta.tags }, exportMeta)
     await navigator.clipboard.writeText(md)
     showToast('📋 Markdown copied!')
   }
 
-  function handleAddAllTranscript() {
-    addAllTranscriptToNotes()
-    showToast(`📝 Added all ${transcriptBlocks.length} lines to notes`)
-  }
-
   return (
     <div className="notes-panel">
-      {/* ── Toolbar ── */}
+      {/* Toolbar */}
       <div className="notes-toolbar">
         <span className="notes-title">
           {session.videoTitle || 'Notes'}
           {hasNotes && <span className="notes-count">{notesBlocks.length}</span>}
         </span>
         <div className="notes-actions">
-          {transcriptBlocks.length > 0 && !allTranscriptInNotes && (
+          {transcriptBlocks.length > 0 && !allInNotes && (
             <button
               className="btn btn-ghost"
               style={{ fontSize: '11px', padding: '4px 8px' }}
-              onClick={handleAddAllTranscript}
+              onClick={() => { addAllTranscriptToNotes(); showToast(`📝 Added all ${transcriptBlocks.length} lines`) }}
               title="Add all transcript lines to notes"
             >
-              📥 Add All Lines
+              📥 Add All
             </button>
           )}
           <button
             className={`btn btn-ghost ${viewMode === 'raw' ? 'btn-active' : ''}`}
             style={{ fontSize: '11px', padding: '4px 8px' }}
             onClick={() => setViewMode(v => v === 'rendered' ? 'raw' : 'rendered')}
-            title={viewMode === 'rendered' ? 'Switch to raw markdown' : 'Switch to rendered view'}
           >
-            {viewMode === 'rendered' ? '&lt;/&gt; Raw' : '👁 Preview'}
+            {viewMode === 'rendered' ? '</> Raw' : '👁 Preview'}
           </button>
           <button
             className="btn btn-ghost"
@@ -142,39 +142,36 @@ export default function NotesPreview({ showToast }) {
             onClick={handleCopyMarkdown}
             disabled={!hasNotes}
           >
-            📋 Copy MD
+            📋 MD
           </button>
         </div>
       </div>
 
-      {/* ── Empty state ── */}
+      {/* Empty state */}
       {!hasNotes && (
         <div className="notes-empty">
           <div className="empty-icon">📝</div>
           <p className="empty-title">Your notes will appear here</p>
           <p className="empty-sub">
-            In the Transcript tab, hover over a sentence and click{' '}
-            <strong>📝 Add to Notes</strong>, or use <strong>📥 Add All Lines</strong> above.
-            Screenshots marked as "Add to Notes" appear inline, anchored to their transcript context.
+            Hover a transcript line and click <strong>📝</strong>, or use <strong>📥 Add All</strong> above.
           </p>
         </div>
       )}
 
-      {/* ── Notes content ── */}
+      {/* Content */}
       {hasNotes && (
         <div className="notes-content">
-          {/* Frontmatter preview */}
+          {/* Source pills */}
           <div className="notes-frontmatter">
             <span className="frontmatter-pill">📅 {new Date(session.createdAt).toLocaleDateString()}</span>
             {session.videoTitle && <span className="frontmatter-pill">🎬 {session.videoTitle}</span>}
-            {session.videoUrl   && (
-              <a className="frontmatter-pill frontmatter-link" href={session.videoUrl} target="_blank" rel="noreferrer">
-                🔗 Source
+            {exportMeta.sourceUrls?.map(({ url, title }) => (
+              <a key={url} className="frontmatter-pill frontmatter-link" href={url} target="_blank" rel="noreferrer" title={title}>
+                🔗 {new URL(url).hostname.replace('www.', '')}
               </a>
-            )}
+            ))}
           </div>
 
-          {/* Block list */}
           <div className="notes-blocks">
             {notesBlocks.map((block) => (
               <NotesBlock
@@ -190,8 +187,8 @@ export default function NotesPreview({ showToast }) {
                   if (e.key === 'Escape') { setEditingId(null); setEditText('') }
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commitEdit()
                 }}
+                onResetOverride={() => clearNoteOverride(block.id)}
                 toggleInNotes={toggleInNotes}
-                deleteBlock={deleteBlock}
               />
             ))}
           </div>
@@ -201,85 +198,73 @@ export default function NotesPreview({ showToast }) {
   )
 }
 
-function blockToMarkdownText(block) {
-  if (block.type === 'transcript') {
-    const ts = block.timestamp !== null ? `> [${formatTime(block.timestamp)}] ` : ''
-    return `${ts}${block.text}`
-  }
-  if (block.type === 'manual') return block.text
-  return block.text || ''
-}
-
-function NotesBlock({ block, isEditing, editText, viewMode, onStartEdit, onEditChange, onEditBlur, onEditKeyDown, toggleInNotes, deleteBlock }) {
+function NotesBlock({ block, isEditing, editText, viewMode, onStartEdit, onEditChange, onEditBlur, onEditKeyDown, onResetOverride, toggleInNotes }) {
   if (block.type === 'screenshot') {
     return (
       <div className="notes-block notes-block-screenshot animate-fade-in">
         <img src={block.imageDataUrl} alt="Screenshot" className="notes-screenshot-img" />
         {block.caption && <p className="notes-screenshot-caption">{block.caption}</p>}
         <div className="notes-block-meta">
-          {block.timestamp !== null && (
-            <span className="notes-ts">📸 {formatTime(block.timestamp)}</span>
-          )}
-          <button 
-            className="btn-icon notes-block-remove" 
-            onClick={() => toggleInNotes(block.id)}
-            title="Remove from notes"
-          >
-            ✕
-          </button>
+          {block.timestamp !== null && <span className="notes-ts">📸 {formatTime(block.timestamp)}</span>}
+          <button className="btn-icon notes-block-remove" onClick={() => toggleInNotes(block.id)} title="Remove from notes">✕</button>
         </div>
       </div>
     )
   }
 
-  // transcript or manual block — editable markdown
-  const mdText = blockToMarkdownText(block)
+  const isTranscript = block.type === 'transcript'
+  const hasOverride  = isTranscript && block.noteOverride != null
+  const displayText  = noteDisplayText(block)
 
   return (
     <div
-      className={`notes-block notes-block-text animate-fade-in ${isEditing ? 'editing' : ''}`}
+      className={`notes-block notes-block-text animate-fade-in ${isEditing ? 'editing' : ''} ${hasOverride ? 'overridden' : ''}`}
       onDoubleClick={!isEditing ? onStartEdit : undefined}
       title={!isEditing ? 'Double-click to edit' : undefined}
     >
       {isEditing ? (
         <div className="notes-editor-wrap">
-          <NotesEditor
-            text={editText}
+          {/* Show original transcript above editor as reference */}
+          {isTranscript && (
+            <div className="notes-editor-original">
+              <span className="notes-editor-original-label">Original:</span>
+              <span className="notes-editor-original-text">{block.text}</span>
+            </div>
+          )}
+          <AutoTextarea
+            value={editText}
             onChange={onEditChange}
             onBlur={onEditBlur}
             onKeyDown={onEditKeyDown}
           />
-          <div className="notes-editor-hint">
-            Ctrl+Enter to save · Esc to cancel
-          </div>
+          <div className="notes-editor-hint">Ctrl+Enter to save · Esc to cancel</div>
         </div>
       ) : viewMode === 'raw' ? (
-        <pre className="notes-raw-text">{mdText}</pre>
+        <pre className="notes-raw-text">{displayText}</pre>
       ) : (
         <div className="notes-rendered">
-          {mdText.split('\n').map((line, i) => (
-            <MarkdownLine key={i} text={line} />
-          ))}
+          {displayText.split('\n').map((line, i) => <MarkdownLine key={i} text={line} />)}
         </div>
       )}
 
-      {/* Actions (only visible on hover, not while editing) */}
+      {/* Original transcript reference (shown when override is active, not editing) */}
+      {!isEditing && hasOverride && (
+        <div className="notes-override-badge" title={`Original: "${block.text}"`}>
+          <span className="notes-override-icon">✏️</span>
+          <span className="notes-override-original" title="Click to revert to original" onClick={onResetOverride}>
+            {block.text.length > 60 ? block.text.slice(0, 60) + '…' : block.text}
+          </span>
+        </div>
+      )}
+
+      {/* Hover actions */}
       {!isEditing && (
         <div className="notes-block-actions">
-          <button
-            className="btn-icon notes-block-edit"
-            onClick={onStartEdit}
-            title="Edit"
-          >
-            ✏️
-          </button>
-          <button
-            className="btn-icon notes-block-remove"
-            onClick={() => toggleInNotes(block.id)}
-            title="Remove from notes"
-          >
-            ✕
-          </button>
+          <button className="btn-icon" onClick={onStartEdit} title="Edit">✏️</button>
+          {hasOverride && (
+            <button className="btn-icon" onClick={onResetOverride} title="Revert to original transcript">↩</button>
+          )}
+          <button className="btn-icon notes-block-remove" onClick={() => toggleInNotes(block.id)} title="Remove from notes">✕</button>
         </div>
       )}
     </div>

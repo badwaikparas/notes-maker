@@ -92,6 +92,8 @@
 }
 .notes-block:hover { background: var(--glass-hover); }
 .notes-block.editing { background: rgba(99, 102, 241, 0.05) !important; }
+.notes-block.overridden { border-left: 2px solid var(--warning); }
+
 
 .notes-block-actions {
   display: flex;
@@ -227,3 +229,48 @@
   transition: opacity var(--transition);
 }
 .notes-block:hover .notes-block-remove { opacity: 1; }
+
+/* ── Override badge (shown below edited text) ── */
+.notes-override-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+.notes-override-icon { flex-shrink: 0; opacity: 0.7; }
+.notes-override-original {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: pointer;
+  line-height: 1.5;
+  transition: color var(--transition);
+}
+.notes-override-original:hover { color: var(--warning); text-decoration: underline; }
+
+/* ── Editor original reference ── */
+.notes-editor-original {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px dashed var(--border-active);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.notes-editor-original-label {
+  color: var(--primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.notes-editor-original-text {
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+

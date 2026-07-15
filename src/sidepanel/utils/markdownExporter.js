@@ -13,56 +13,68 @@ export function formatTime(seconds) {
 }
 
 /**
- * Build Obsidian-ready Markdown from the notes blocks.
- * Screenshots are referenced as relative paths: ./assets/screenshot-<id>.png
- *
- * @param {object} session  - { videoTitle, videoUrl, createdAt }
- * @param {Array}  blocks   - filtered notesBlocks
- * @param {object} settings - { noteHeadingLevel }
- * @returns {string} markdown string
+ * Build the text content of a block for the notes markdown output.
+ * For transcript blocks, respects `noteOverride` if set.
  */
-export function buildMarkdown(session, blocks, settings) {
-  const headingChar = settings.noteHeadingLevel === 'h1' ? '#'
-    : settings.noteHeadingLevel === 'h3' ? '###'
-    : '##'
+function blockNoteText(block) {
+  if (block.type === 'transcript') return block.noteOverride ?? block.text
+  return block.text ?? ''
+}
 
-  const date = new Date(session.createdAt).toISOString().split('T')[0]
+/**
+ * Build Obsidian-ready Markdown.
+ *
+ * @param {object} session  — { videoTitle, videoUrl, createdAt, sourceUrls? }
+ * @param {Array}  blocks   — notesBlocks
+ * @param {object} settings — { exportTags? }
+ * @param {object} exportMeta — optional { sourceUrls, tags }
+ */
+export function buildMarkdown(session, blocks, settings, exportMeta) {
+  const date  = new Date(session.createdAt).toISOString().split('T')[0]
   const title = session.videoTitle || 'Course Notes'
-  const tags = (settings.exportTags && settings.exportTags.length > 0)
-    ? settings.exportTags.join(', ')
-    : 'notes, course'
+  const tags  = (settings.exportTags?.length > 0) ? settings.exportTags.join(', ') : 'notes, course'
 
-  const frontmatter = [
+  // Gather source URLs — prefer exportMeta.sourceUrls, fall back to session.videoUrl
+  const sourceUrls = exportMeta?.sourceUrls ?? session.sourceUrls ?? []
+  const primarySource = sourceUrls[0]?.url || session.videoUrl || ''
+  const extraSources  = sourceUrls.slice(1).map((s) => s.url)
+
+  const frontmatterLines = [
     '---',
     `title: "${title}"`,
     `date: ${date}`,
     `tags: [${tags}]`,
-    session.videoUrl ? `source: "${session.videoUrl}"` : '',
+    primarySource ? `source: "${primarySource}"` : '',
+    ...extraSources.map((u) => `source_extra: "${u}"`),
     '---',
-  ].filter(Boolean).join('\n')
+  ].filter(Boolean)
 
-
+  const frontmatter = frontmatterLines.join('\n')
   const header = `\n# ${title}\n`
 
   const body = blocks.map((block) => {
     switch (block.type) {
       case 'transcript': {
-        const ts = block.timestamp !== null ? `> [${formatTime(block.timestamp)}] ` : ''
-        return `${ts}${block.text}`
+        const text = blockNoteText(block)
+        const ts   = block.timestamp !== null ? `> [${formatTime(block.timestamp)}] ` : ''
+        // If user edited, add a comment showing original
+        const editNote = block.noteOverride != null
+          ? `\n<!-- original: ${block.text} -->`
+          : ''
+        return `${ts}${text}${editNote}`
       }
       case 'screenshot': {
         const filename = `screenshot-${block.id.slice(0, 8)}.png`
-        const caption = block.caption ? `\n*${block.caption}*` : ''
-        const ts = block.timestamp !== null ? ` — at ${formatTime(block.timestamp)}` : ''
+        const caption  = block.caption ? `\n*${block.caption}*` : ''
+        const ts       = block.timestamp !== null ? ` — at ${formatTime(block.timestamp)}` : ''
         return `\n![Screenshot${ts}](./assets/${filename})${caption}\n`
       }
       case 'heading': {
         const lvl = block.level === 'h1' ? '#' : block.level === 'h3' ? '###' : '##'
         return `\n${lvl} ${block.text}\n`
       }
-      case 'manual': {
+      case 'manual':
         return block.text
-      }
       default:
         return ''
     }
@@ -72,7 +84,7 @@ export function buildMarkdown(session, blocks, settings) {
 }
 
 /**
- * Build a plain-text transcript from all transcript blocks.
+ * Build plain-text transcript.
  */
 export function buildTranscriptText(blocks) {
   return blocks
@@ -84,9 +96,6 @@ export function buildTranscriptText(blocks) {
     .join('\n\n')
 }
 
-/**
- * Convert a base64 data URL to a Uint8Array suitable for JSZip.
- */
 function dataUrlToUint8Array(dataUrl) {
   const base64 = dataUrl.split(',')[1]
   const binary = atob(base64)
@@ -95,89 +104,45 @@ function dataUrlToUint8Array(dataUrl) {
   return arr
 }
 
-/**
- * Create and download a ZIP containing notes.md + assets/*.png
- *
- * @param {object} session
- * @param {Array}  blocks    - all notesBlocks
- * @param {object} settings
- */
-export async function downloadNotesZip(session, blocks, settings, allBlocks = []) {
+export async function downloadNotesZip(session, blocks, settings, allBlocks = [], exportMeta) {
   const zip = new JSZip()
-  
-  // 1. Add notes.md
-  const markdown = buildMarkdown(session, blocks, settings)
-  zip.file('notes.md', markdown)
-
-  // 2. Add transcript.txt
-  if (allBlocks && allBlocks.length > 0) {
-    const transcriptText = buildTranscriptText(allBlocks)
-    if (transcriptText) {
-      zip.file('transcript.txt', transcriptText)
-    }
+  zip.file('notes.md', buildMarkdown(session, blocks, settings, exportMeta))
+  if (allBlocks.length > 0) {
+    const txt = buildTranscriptText(allBlocks)
+    if (txt) zip.file('transcript.txt', txt)
   }
-
-  // 3. Add screenshots folder
   const screenshots = blocks.filter((b) => b.type === 'screenshot')
   if (screenshots.length > 0) {
-    const assetsFolder = zip.folder('assets')
+    const assets = zip.folder('assets')
     for (const block of screenshots) {
-      const filename = `screenshot-${block.id.slice(0, 8)}.png`
-      assetsFolder.file(filename, dataUrlToUint8Array(block.imageDataUrl))
+      assets.file(`screenshot-${block.id.slice(0, 8)}.png`, dataUrlToUint8Array(block.imageDataUrl))
     }
   }
-
   const blob = await zip.generateAsync({ type: 'blob' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  const safeName = (session.videoTitle || 'notes').replace(/[^a-z0-9]/gi, '_').toLowerCase()
   a.href = url
-  a.download = `${safeName}.zip`
+  a.download = `${(session.videoTitle || 'notes').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.zip`
   a.click()
   URL.revokeObjectURL(url)
 }
 
-/**
- * Download only the plain text transcript.
- */
 export function downloadTranscript(session, blocks) {
   const text = buildTranscriptText(blocks)
   const blob = new Blob([text], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  const safeName = (session.videoTitle || 'transcript').replace(/[^a-z0-9]/gi, '_').toLowerCase()
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
   a.href = url
-  a.download = `${safeName}_transcript.txt`
+  a.download = `${(session.videoTitle || 'transcript').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`
   a.click()
   URL.revokeObjectURL(url)
 }
 
-/**
- * Copy Markdown to clipboard (screenshots as inline base64).
- */
-export async function copyMarkdownToClipboard(session, blocks, settings) {
-  // For clipboard, embed screenshots as base64 inline
-  const inlineBlocks = blocks.map((b) =>
-    b.type === 'screenshot'
-      ? { ...b, _inline: true }
-      : b
-  )
-
-  const md = blocks.map((block) => {
-    if (block.type === 'screenshot') {
-      const caption = block.caption ? `\n*${block.caption}*` : ''
-      const ts = block.timestamp !== null ? ` — at ${formatTime(block.timestamp)}` : ''
-      return `\n![Screenshot${ts}](${block.imageDataUrl})${caption}\n`
-    }
-    return null
-  })
-
-  // Use the regular builder but replace screenshot paths with base64
-  let markdown = buildMarkdown(session, inlineBlocks, settings)
+export async function copyMarkdownToClipboard(session, blocks, settings, exportMeta) {
+  let markdown = buildMarkdown(session, blocks, settings, exportMeta)
   for (const block of blocks.filter((b) => b.type === 'screenshot')) {
     const filename = `screenshot-${block.id.slice(0, 8)}.png`
     markdown = markdown.replace(`./assets/${filename}`, block.imageDataUrl)
   }
-
   await navigator.clipboard.writeText(markdown)
 }

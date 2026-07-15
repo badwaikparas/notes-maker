@@ -224,3 +224,36 @@
   font-size: 11px;
 }
 
+/* ── Source URL list ── */
+.source-url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.source-url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.source-url-link {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--primary-hover);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-url-link:hover { text-decoration: underline; }
+.source-url-del { opacity: 0.4; transition: opacity var(--transition); }
+.source-url-row:hover .source-url-del { opacity: 1; }
+.source-url-add-row { display: flex; gap: 6px; }
+.source-empty { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.export-meta-hint { font-size: 10px; color: var(--text-muted); font-weight: 400; }
+
+
