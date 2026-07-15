@@ -8,7 +8,10 @@
     "build": "vite build",
     "postbuild": "cp manifest.json dist/ && cp -r public/icons dist/icons 2>/dev/null || true",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "snapshot": "node scripts/snapshot.js",
+    "snapshotd": "node scripts/snapshotd.js",
+    "release": "npm run build && npm run snapshot"
   },
   "dependencies": {
     "jszip": "^3.10.1",
@@ -21,6 +24,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "fs-extra": "^11.3.6",
     "oxlint": "^1.71.0",
     "vite": "^8.1.1"
   }
