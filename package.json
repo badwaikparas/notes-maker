@@ -1,12 +1,12 @@
 {
   "name": "notes-maker",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",
-    "postbuild": "cp manifest.json dist/ && cp -r public/icons dist/icons 2>/dev/null || true",
+    "postbuild": "cp manifest.json builds/current && cp -r public/icons builds/current/icons 2>/dev/null || true",
     "lint": "oxlint",
     "preview": "vite preview",
     "snapshot": "node scripts/snapshot.js",

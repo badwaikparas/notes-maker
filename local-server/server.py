@@ -1,10 +1,15 @@
 import numpy as np
+from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
 import uvicorn
 import asyncio
 import json
+
+
+version = json.loads(Path("../version.json").read_text())
+API_VERSION = version["apiVersion"]
 
 app = FastAPI()
 
@@ -21,6 +26,12 @@ print("(This may take a moment the very first time as it downloads the model)")
 # Using the "tiny.en" model for extreme speed. You can change this to "base.en" or "small.en"
 model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
 print("Model loaded and ready!")
+
+@app.get("/version")
+async def version():
+    return {
+        "apiVersion": API_VERSION,
+    }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
