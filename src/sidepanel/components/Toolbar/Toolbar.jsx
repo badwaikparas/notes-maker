@@ -13,27 +13,23 @@ export default function Toolbar({ showToast }) {
   const setScrollLocked        = useNotesStore((s) => s.setScrollLocked)
   const clearSession           = useNotesStore((s) => s.clearSession)
 
-  const videoTimeRef     = useRef(null)
-  const streamRef        = useRef(null)
-  const audioCtxRef      = useRef(null)
-  const analyserRef      = useRef(null)
-  const animFrameRef     = useRef(null)
-  const volumeBarRef     = useRef(null)
-  const wsRef            = useRef(null)
+  const videoTimeRef         = useRef(null)
+  const streamRef            = useRef(null)
+  const audioCtxRef          = useRef(null)
+  const analyserRef          = useRef(null)
+  const animFrameRef         = useRef(null)
+  const volumeBarRef         = useRef(null)
+  const wsRef                = useRef(null)
   const connectionAttemptRef = useRef(0)
-  const keepAliveRef     = useRef(null)
 
-  // ── Poll active tab for video time and auto-capture URL ─────────────────
+  // Poll active tab for video time and source URL
   useEffect(() => {
     if (!transcription.isActive) { videoTimeRef.current = null; return }
     const interval = setInterval(async () => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
         if (!tab) return
-        // Auto-extract the URL from the tab being transcribed
-        if (tab.url && !tab.url.startsWith('chrome')) {
-          addSourceUrl(tab.url, tab.title)
-        }
+        if (tab.url && !tab.url.startsWith('chrome')) addSourceUrl(tab.url, tab.title)
         const res = await chrome.tabs.sendMessage(tab.id, { type: 'GET_VIDEO_INFO' })
         if (res?.hasVideo) {
           videoTimeRef.current = res.currentTime
@@ -44,7 +40,7 @@ export default function Toolbar({ showToast }) {
     return () => clearInterval(interval)
   }, [transcription.isActive])
 
-  // ── Volume Meter ─────────────────────────────────────────────────────────
+  // Volume Meter
   function updateVolumeMeter() {
     if (!analyserRef.current || !volumeBarRef.current) return
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
@@ -62,64 +58,69 @@ export default function Toolbar({ showToast }) {
     if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
     if (volumeBarRef.current) volumeBarRef.current.style.transform = 'scaleX(0)'
-    if (keepAliveRef.current) { clearInterval(keepAliveRef.current); keepAliveRef.current = null }
   }
 
-  // ── WS message handler ───────────────────────────────────────────────────
+  // WebSocket message handler
   function handleServerMessage(event) {
     let data
     try { data = JSON.parse(event.data) } catch { return }
-
     if (data.type === 'interim') {
       setInterimText(data.text)
     } else if (data.type === 'final') {
       setInterimText('')
-      if (data.text?.trim()) {
-        addTranscriptBlock(data.text.trim(), videoTimeRef.current)
-      }
+      if (data.text?.trim()) addTranscriptBlock(data.text.trim(), videoTimeRef.current)
     }
   }
 
-  // ── Start recording ───────────────────────────────────────────────────────
   async function startSpeechRecognition() {
     const currentAttempt = ++connectionAttemptRef.current
 
-    // ── Step 1: test WebSocket BEFORE asking for screen share ───────────────
-    // This gives a clear error to new users if the server isn't running,
-    // without any confusing partial UX.
+    // Step 1: Pre-flight check — verify Whisper server is reachable
     try {
       await new Promise((resolve, reject) => {
         const testWs = new WebSocket('ws://127.0.0.1:5000/ws')
         testWs.onopen = () => { testWs.close(); resolve() }
         testWs.onerror = () => reject(new Error(
-          'Whisper server is not running at 127.0.0.1:5000.\n' +
-          'Start the local server first: cd local-server && python server.py'
+          'Whisper server not running at 127.0.0.1:5000. Start it with: cd local-server && python server.py'
         ))
-        // Timeout after 3 seconds
-        setTimeout(() => reject(new Error('Connection to Whisper server timed out. Is it running?')), 3000)
+        setTimeout(() => reject(new Error('Connection to Whisper server timed out.')), 3000)
       })
     } catch (err) {
       if (currentAttempt === connectionAttemptRef.current) {
         setTranscriptionError(err.message)
-        showToast('❌ Server not running — see Transcript for details')
+        showToast('Server not running — see Transcript tab')
       }
       return
     }
 
-    // ── Step 2: capture tab audio ────────────────────────────────────────────
+    // Step 2: Request audio stream via chrome.tabCapture (background handles this).
+    // Unlike getDisplayMedia:
+    //   • Captures the CURRENT tab (getDisplayMedia always excludes it)
+    //   • No picker dialog shown to the user
+    //   • Works even when the extension is an in-page iframe overlay
     let stream
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: 'browser' },
-        audio: true,
+      const resp = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'REQUEST_TAB_AUDIO_STREAM' }, (r) => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message))
+          else if (r?.error) reject(new Error(r.error))
+          else resolve(r)
+        })
       })
-      if (stream.getAudioTracks().length === 0) {
-        stream.getTracks().forEach(t => t.stop())
-        throw new Error("You must check 'Share tab audio' in the prompt!")
-      }
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: resp.streamId,
+          },
+        },
+        video: false,
+      })
     } catch (err) {
       if (currentAttempt === connectionAttemptRef.current) {
-        setTranscriptionError(`Could not capture audio: ${err.message}`)
+        setTranscriptionError(`Could not capture tab audio: ${err.message}`)
+        showToast('Audio capture failed — see Transcript tab')
       }
       return
     }
@@ -128,19 +129,16 @@ export default function Toolbar({ showToast }) {
       stream.getTracks().forEach(t => t.stop()); return
     }
 
-    stream.getVideoTracks().forEach(t => t.stop())
     stream.getAudioTracks()[0].addEventListener('ended', () => { if (wsRef.current) stopSpeechRecognition() })
     streamRef.current = stream
 
-    // ── Step 3: auto-capture the URL of the tab we're recording ─────────────
+    // Step 3: Auto-capture current tab URL
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tab?.url && !tab.url.startsWith('chrome')) {
-        addSourceUrl(tab.url, tab.title)
-      }
+      if (tab?.url && !tab.url.startsWith('chrome')) addSourceUrl(tab.url, tab.title)
     } catch (_) {}
 
-    // ── Step 4: audio context ────────────────────────────────────────────────
+    // Step 4: Set up audio analysis (volume meter)
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 })
     const analyser = audioCtx.createAnalyser()
     analyser.fftSize = 256
@@ -150,27 +148,24 @@ export default function Toolbar({ showToast }) {
     analyserRef.current = analyser
     updateVolumeMeter()
 
-    // ── Step 5: real WebSocket ───────────────────────────────────────────────
+    // Step 5: Connect to Whisper WebSocket
     const ws = new WebSocket('ws://127.0.0.1:5000/ws')
     wsRef.current = ws
 
     ws.onopen = () => {
       setTranscriptionActive(true)
-      showToast('🎙️ Connected to Whisper server!')
+      showToast('Connected to Whisper server!')
     }
-
     ws.onmessage = handleServerMessage
-
     ws.onerror = () => {
-      setTranscriptionError('Connection to Whisper server lost. Is the server still running?')
+      setTranscriptionError('Whisper server connection lost. Is the server still running?')
       stopSpeechRecognition()
     }
-
     ws.onclose = () => {
       if (wsRef.current !== null) stopSpeechRecognition()
     }
 
-    // ── Step 6: stream audio ─────────────────────────────────────────────────
+    // Step 6: Stream raw audio to Whisper via ScriptProcessor
     const processor = audioCtx.createScriptProcessor(4096, 1, 1)
     processor.onaudioprocess = (e) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -195,7 +190,7 @@ export default function Toolbar({ showToast }) {
   function handleToggle() {
     if (transcription.isActive) {
       stopSpeechRecognition()
-      showToast('⏹ Transcription stopped')
+      showToast('Transcription stopped')
     } else {
       startSpeechRecognition()
     }
@@ -205,7 +200,7 @@ export default function Toolbar({ showToast }) {
     if (!confirm('Clear all blocks in this session?')) return
     stopSpeechRecognition()
     clearSession()
-    showToast('🗑️ Session cleared')
+    showToast('Session cleared')
   }
 
   return (

@@ -185,5 +185,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true })
     return false
   }
+
+  // Temporarily hide overlay so the screenshot is clean (no panel on top of the page)
+  if (message.type === 'HIDE_FOR_SCREENSHOT') {
+    const host = document.getElementById(OVERLAY_ID)
+    const tab  = document.getElementById(TOGGLE_BTN_ID)
+    if (host) host.style.visibility = 'hidden'
+    if (tab)  tab.style.visibility  = 'hidden'
+    sendResponse({ ok: true })
+    return false
+  }
+
+  if (message.type === 'SHOW_AFTER_SCREENSHOT') {
+    const host = document.getElementById(OVERLAY_ID)
+    const tab  = document.getElementById(TOGGLE_BTN_ID)
+    if (host) host.style.visibility = ''
+    if (tab)  tab.style.visibility  = ''
+    sendResponse({ ok: true })
+    return false
+  }
 })
+
 
