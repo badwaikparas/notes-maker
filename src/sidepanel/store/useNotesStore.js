@@ -17,7 +17,10 @@ const DEFAULT_SETTINGS = {
   autoSaveInterval: 30,
   autoAddScreenshotsToNotes: true,
   deleteScreenshotFromGalleryOnNotesRemoval: false,
-  showScreenshotsInTranscript: false,   // toggle to show inline screenshots in transcript tab
+  showScreenshotsInTranscript: false,  // inline screenshots anchored in transcript tab
+  showTimestampsInTranscript: true,    // show [MM:SS] timestamps beside each sentence
+  includeTimestampsInMarkdown: true,   // include > [MM:SS] prefix in exported markdown
+  includeOriginalInMarkdown: false,    // include <!-- original: ... --> comment when text is edited
   screenshotQuality: 0.85,
 }
 

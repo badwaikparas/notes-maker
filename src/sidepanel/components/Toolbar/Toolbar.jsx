@@ -93,44 +93,27 @@ export default function Toolbar({ showToast }) {
       return
     }
 
-    // Step 2: Get the active tab ID (we need to send it explicitly because
-    // sender.tab is undefined when the message comes from an extension iframe page,
-    // as opposed to a content script).
-    let activeTabId = null
-    try {
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      activeTabId = activeTab?.id ?? null
-    } catch (_) {}
-
-    if (!activeTabId) {
-      setTranscriptionError('Could not determine the active tab. Try clicking the page first.')
-      return
-    }
-
-    // Step 3: Request a tabCapture stream ID from the background service worker.
-    // tabCapture captures the CURRENT tab audio without any picker dialog.
+    // Step 2: Show desktop picker (includes current tab) via background desktopCapture.
+    // desktopCapture.chooseDesktopMedia shows ALL tabs including the current one,
+    // unlike getDisplayMedia which always excludes the current tab.
     let stream
     try {
+      showToast('Select the tab to transcribe in the picker...')
       const resp = await new Promise((resolve, reject) => {
-        // Timeout safety — if the service worker doesn't respond in 5s, fail gracefully
-        const timer = setTimeout(() => reject(new Error('Background service worker did not respond in time.')), 5000)
-        chrome.runtime.sendMessage({ type: 'REQUEST_TAB_AUDIO_STREAM', tabId: activeTabId }, (r) => {
+        const timer = setTimeout(() => reject(new Error('Picker timed out or was cancelled.')), 60000)
+        chrome.runtime.sendMessage({ type: 'REQUEST_TAB_AUDIO_STREAM' }, (r) => {
           clearTimeout(timer)
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message))
-          } else if (r?.error) {
-            reject(new Error(r.error))
-          } else {
-            resolve(r)
-          }
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message))
+          else if (r?.error) reject(new Error(r.error))
+          else resolve(r)
         })
       })
 
-      // Use the streamId returned by the background to open an audio-only MediaStream
+      // desktopCapture returns a 'desktop' source streamId
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           mandatory: {
-            chromeMediaSource: 'tab',
+            chromeMediaSource: 'desktop',
             chromeMediaSourceId: resp.streamId,
           },
         },
@@ -151,9 +134,8 @@ export default function Toolbar({ showToast }) {
     stream.getAudioTracks()[0].addEventListener('ended', () => { if (wsRef.current) stopSpeechRecognition() })
     streamRef.current = stream
 
-    // Step 4: Auto-capture source URL
+    // Step 3b: Auto-capture source URL
     try {
-      addSourceUrl(`https://...tab-${activeTabId}`, `Tab ${activeTabId}`)
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (tab?.url && !tab.url.startsWith('chrome')) addSourceUrl(tab.url, tab.title)
     } catch (_) {}

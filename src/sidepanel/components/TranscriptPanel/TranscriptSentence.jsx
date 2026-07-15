@@ -5,6 +5,7 @@ import './TranscriptPanel.css'
 
 export default function TranscriptSentence({ block, index, anchoredScreenshots = [], showToast }) {
   const selectedIds  = useNotesStore((s) => s.selectedIds)
+  const settings     = useNotesStore((s) => s.settings)
   const toggleSelect = useNotesStore((s) => s.toggleSelect)
   const selectRange  = useNotesStore((s) => s.selectRange)
   const toggleInNotes= useNotesStore((s) => s.toggleInNotes)
@@ -13,13 +14,15 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots =
   const [hovered, setHovered]     = useState(false)
   const [copyFlash, setCopyFlash] = useState(false)
 
-  const isSelected = selectedIds.has(block.id)
+  const isSelected  = selectedIds.has(block.id)
+  const hasOverride = block.noteOverride != null
+  const showTs      = settings.showTimestampsInTranscript ?? true
 
   async function handleClick(e) {
     if (e.shiftKey) { selectRange(block.id); return }
     await navigator.clipboard.writeText(block.text)
     setCopyFlash(true)
-    showToast('📋 Copied!')
+    showToast('Copied!')
     setTimeout(() => setCopyFlash(false), 1000)
   }
 
@@ -28,8 +31,6 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots =
   }
 
   const ts = formatTime(block.timestamp)
-  // Show ✏️ badge if the block has a noteOverride in the Notes tab
-  const hasOverride = block.noteOverride != null
 
   return (
     <div className="sentence-group animate-fade-in">
@@ -40,12 +41,14 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots =
         onClick={handleClick}
         onMouseDown={handleMouseDown}
       >
-        {ts && <span className="sentence-ts" title={`Video time: ${ts}`}>{ts}</span>}
+        {showTs && ts && (
+          <span className="sentence-ts" title={`Video time: ${ts}`}>{ts}</span>
+        )}
 
         <p className="sentence-text">
           {block.text}
           {hasOverride && (
-            <span className="sentence-edited-badge" title="This sentence has a user-edited version in Notes">✏️</span>
+            <span className="sentence-edited-badge" title="Edited in Notes">✏️</span>
           )}
         </p>
 
@@ -60,7 +63,7 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots =
             </button>
             <button
               className="btn-icon"
-              title="Delete sentence"
+              title="Delete"
               onClick={(e) => { e.stopPropagation(); deleteBlock(block.id) }}
             >
               🗑️
@@ -72,11 +75,18 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots =
         {isSelected && <span className="sentence-checkbox">✓</span>}
       </div>
 
-      {/* Inline screenshot thumbnails (only when enabled in Settings) */}
+      {/* Inline screenshot cards — same style as Notes tab */}
       {anchoredScreenshots.map((ss) => (
-        <div key={ss.id} className="anchored-screenshot">
+        <div key={ss.id} className="anchored-screenshot-card">
           <img src={ss.imageDataUrl} alt="Screenshot" className="anchored-screenshot-img" />
-          {ss.caption && <span className="anchored-screenshot-caption">{ss.caption}</span>}
+          {ss.caption && (
+            <p className="anchored-screenshot-caption">{ss.caption}</p>
+          )}
+          <div className="anchored-screenshot-meta">
+            {ss.timestamp != null && (
+              <span className="anchored-screenshot-ts">📸 {formatTime(ss.timestamp)}</span>
+            )}
+          </div>
         </div>
       ))}
     </div>

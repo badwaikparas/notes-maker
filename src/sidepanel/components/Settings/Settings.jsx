@@ -99,6 +99,13 @@ export default function Settings() {
           >
             <Toggle checked={settings.showScreenshotsInTranscript ?? false} onChange={() => toggle('showScreenshotsInTranscript')} id="tog-ss-in-transcript" />
           </SettingRow>
+
+          <SettingRow
+            label="Show timestamps in Transcript"
+            desc="Display [MM:SS] video time next to each transcribed sentence"
+          >
+            <Toggle checked={settings.showTimestampsInTranscript ?? true} onChange={() => toggle('showTimestampsInTranscript')} id="tog-ts-in-transcript" />
+          </SettingRow>
         </section>
 
         {/* ── Notes ── */}
@@ -112,7 +119,26 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* ── Auto-save ── */}
+        {/* Markdown Export */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">📄 Markdown Export</h3>
+
+          <SettingRow
+            label="Include timestamps"
+            desc="Add > [MM:SS] prefix to transcript lines in the exported .md file"
+          >
+            <Toggle checked={settings.includeTimestampsInMarkdown ?? true} onChange={() => toggle('includeTimestampsInMarkdown')} id="tog-ts-in-md" />
+          </SettingRow>
+
+          <SettingRow
+            label="Include original when edited"
+            desc="When a Note is edited, add an HTML comment with the original transcript text in the .md export"
+          >
+            <Toggle checked={settings.includeOriginalInMarkdown ?? false} onChange={() => toggle('includeOriginalInMarkdown')} id="tog-orig-in-md" />
+          </SettingRow>
+        </section>
+
+        {/* Auto-save */}
         <section className="settings-section">
           <h3 className="settings-section-title">💾 Auto-Save</h3>
           <SettingRow label="Interval" desc="How often your session is auto-saved">

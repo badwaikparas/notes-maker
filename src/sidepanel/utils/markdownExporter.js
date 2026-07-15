@@ -1,8 +1,5 @@
 import JSZip from 'jszip'
 
-/**
- * Format seconds → MM:SS or HH:MM:SS
- */
 export function formatTime(seconds) {
   if (seconds === null || seconds === undefined || isNaN(seconds)) return ''
   const h = Math.floor(seconds / 3600)
@@ -13,39 +10,48 @@ export function formatTime(seconds) {
 }
 
 /**
- * Build the text content of a block for the notes markdown output.
- * For transcript blocks, respects `noteOverride` if set.
- */
-function blockNoteText(block) {
-  if (block.type === 'transcript') return block.noteOverride ?? block.text
-  return block.text ?? ''
-}
-
-/**
  * Build Obsidian-ready Markdown.
  *
- * @param {object} session  — { videoTitle, videoUrl, createdAt, sourceUrls? }
- * @param {Array}  blocks   — notesBlocks
- * @param {object} settings — { exportTags? }
- * @param {object} exportMeta — optional { sourceUrls, tags }
+ * Settings used:
+ *   includeTimestampsInMarkdown — prefix transcript lines with > [MM:SS]
+ *   includeOriginalInMarkdown   — add HTML comment showing original when noteOverride is set
+ *
+ * Source format:
+ *   Single  → source: "url"
+ *   Multiple→ source: |
+ *               1. "url1"
+ *               2. "url2"
  */
 export function buildMarkdown(session, blocks, settings, exportMeta) {
   const date  = new Date(session.createdAt).toISOString().split('T')[0]
   const title = session.videoTitle || 'Course Notes'
   const tags  = (settings.exportTags?.length > 0) ? settings.exportTags.join(', ') : 'notes, course'
 
-  // Gather source URLs — prefer exportMeta.sourceUrls, fall back to session.videoUrl
-  const sourceUrls = exportMeta?.sourceUrls ?? session.sourceUrls ?? []
-  const primarySource = sourceUrls[0]?.url || session.videoUrl || ''
-  const extraSources  = sourceUrls.slice(1).map((s) => s.url)
+  const includeTs       = settings.includeTimestampsInMarkdown ?? true
+  const includeOriginal = settings.includeOriginalInMarkdown   ?? false
+
+  // Gather source URLs — filter out dummy tab placeholders
+  const rawUrls = (exportMeta?.sourceUrls ?? [])
+    .map((s) => s.url)
+    .filter((u) => u && !u.startsWith('https://...tab-'))
+
+  // Deduplicate
+  const sourceUrls = [...new Set(rawUrls)]
+
+  let sourceLine = ''
+  if (sourceUrls.length === 1) {
+    sourceLine = `source: "${sourceUrls[0]}"`
+  } else if (sourceUrls.length > 1) {
+    const numbered = sourceUrls.map((u, i) => `  ${i + 1}. "${u}"`).join('\n')
+    sourceLine = `source: |\n${numbered}`
+  }
 
   const frontmatterLines = [
     '---',
     `title: "${title}"`,
     `date: ${date}`,
     `tags: [${tags}]`,
-    primarySource ? `source: "${primarySource}"` : '',
-    ...extraSources.map((u) => `source_extra: "${u}"`),
+    sourceLine,
     '---',
   ].filter(Boolean)
 
@@ -55,13 +61,14 @@ export function buildMarkdown(session, blocks, settings, exportMeta) {
   const body = blocks.map((block) => {
     switch (block.type) {
       case 'transcript': {
-        const text = blockNoteText(block)
-        const ts   = block.timestamp !== null ? `> [${formatTime(block.timestamp)}] ` : ''
-        // If user edited, add a comment showing original
-        const editNote = block.noteOverride != null
+        const text = block.noteOverride ?? block.text
+        const tsPrefix = includeTs && block.timestamp !== null
+          ? `> [${formatTime(block.timestamp)}] `
+          : ''
+        const originalComment = includeOriginal && block.noteOverride != null
           ? `\n<!-- original: ${block.text} -->`
           : ''
-        return `${ts}${text}${editNote}`
+        return `${tsPrefix}${text}${originalComment}`
       }
       case 'screenshot': {
         const filename = `screenshot-${block.id.slice(0, 8)}.png`
@@ -83,9 +90,6 @@ export function buildMarkdown(session, blocks, settings, exportMeta) {
   return `${frontmatter}${header}\n${body}\n`
 }
 
-/**
- * Build plain-text transcript.
- */
 export function buildTranscriptText(blocks) {
   return blocks
     .filter((b) => b.type === 'transcript')
@@ -119,9 +123,9 @@ export async function downloadNotesZip(session, blocks, settings, allBlocks = []
     }
   }
   const blob = await zip.generateAsync({ type: 'blob' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
   a.download = `${(session.videoTitle || 'notes').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.zip`
   a.click()
   URL.revokeObjectURL(url)
@@ -132,7 +136,7 @@ export function downloadTranscript(session, blocks) {
   const blob = new Blob([text], { type: 'text/plain' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
-  a.href = url
+  a.href     = url
   a.download = `${(session.videoTitle || 'transcript').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`
   a.click()
   URL.revokeObjectURL(url)

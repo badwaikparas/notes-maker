@@ -68,30 +68,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
-  // Tab audio capture via chrome.tabCapture.
-  // The Toolbar sends tabId explicitly because sender.tab is undefined
-  // when the message comes from an extension page (iframe), not a content script.
+  // Tab audio capture.
+  // chrome.tabCapture.getMediaStreamId fails with "Extension has not been invoked"
+  // when called from a MV3 service worker without an active-tab user gesture.
+  // chrome.desktopCapture.chooseDesktopMedia is reliable, works from service workers,
+  // and — unlike getDisplayMedia — DOES show the current tab in the picker.
   if (message.type === 'REQUEST_TAB_AUDIO_STREAM') {
-    const tabId = message.tabId
-    if (!tabId) {
-      sendResponse({ error: 'No tabId in REQUEST_TAB_AUDIO_STREAM message.' })
-      return false
-    }
-
-    // Do not set consumerTabId — leaving it out makes the streamId usable
-    // from any extension context (including the iframe extension page).
-    chrome.tabCapture.getMediaStreamId(
-      { targetTabId: tabId },
+    chrome.desktopCapture.chooseDesktopMedia(
+      ['tab', 'audio'],
+      null,
       (streamId) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ error: chrome.runtime.lastError.message })
+        if (!streamId) {
+          sendResponse({ error: 'Screen picker was cancelled.' })
         } else {
           sendResponse({ streamId })
         }
       }
     )
-    return true  // keep message port open for async callback
+    return true  // async
   }
+
 
   // Relay minimize command from iframe back to the host tab's content script
   if (message.type === 'MINIMIZE_OVERLAY') {
