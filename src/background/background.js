@@ -1,20 +1,19 @@
 /**
  * Background Service Worker
  *
- * Architecture: the UI runs as an iframe overlay injected by the content script.
- * The UI page is a chrome-extension:// page so it receives chrome.runtime messages,
- * NOT chrome.tabs.sendMessage (that goes to content scripts only).
+ * The UI runs as an iframe overlay injected by the content script.
+ * Extension iframe pages are chrome-extension:// pages, so:
+ *   - chrome.runtime.sendMessage  -> reaches background + all extension pages
+ *   - chrome.tabs.sendMessage     -> reaches content scripts only
+ *   - sender.tab is undefined for messages from extension pages (not content scripts)
  *
- * Screenshot delivery: background → chrome.runtime.sendMessage (broadcast to all
- * extension pages, including the iframe) AND stored in queue for drain on open.
- *
- * Audio capture: uses chrome.tabCapture.getMediaStreamId so there's no picker dialog
- * and the current tab IS capturable.
+ * Screenshot flow: background -> chrome.runtime.sendMessage (broadcast) -> iframe
+ * Audio flow:      Toolbar (iframe) -> background -> chrome.tabCapture -> streamId -> Toolbar
  */
 
 import { API_VERSION } from '../config/version.js'
 
-// ─── Screenshot Command ───────────────────────────────────────────────────────
+// Screenshot Command (Ctrl+Shift+S)
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'take-screenshot') return
 
@@ -22,24 +21,17 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (!tab) return
 
   try {
-    // 1. Ask content script to temporarily HIDE the overlay so it doesn't
-    //    appear in the screenshot. Content script hides, we wait, then capture.
-    try {
-      await chrome.tabs.sendMessage(tab.id, { type: 'HIDE_FOR_SCREENSHOT' })
-    } catch (_) {}
-
-    // Small delay for the DOM to repaint without the overlay
+    // 1. Hide the overlay so it doesn't appear in the screenshot
+    try { await chrome.tabs.sendMessage(tab.id, { type: 'HIDE_FOR_SCREENSHOT' }) } catch (_) {}
     await new Promise((r) => setTimeout(r, 120))
 
-    // 2. Capture the visible tab (now without the overlay)
+    // 2. Capture the clean tab screenshot
     const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
 
-    // 3. Restore overlay immediately after capture
-    try {
-      chrome.tabs.sendMessage(tab.id, { type: 'SHOW_AFTER_SCREENSHOT' })
-    } catch (_) {}
+    // 3. Restore overlay
+    try { chrome.tabs.sendMessage(tab.id, { type: 'SHOW_AFTER_SCREENSHOT' }) } catch (_) {}
 
-    // 4. Get video time from content script
+    // 4. Get video time
     let videoTime = null
     try {
       const res = await chrome.tabs.sendMessage(tab.id, { type: 'GET_VIDEO_TIME' })
@@ -48,12 +40,11 @@ chrome.commands.onCommand.addListener(async (command) => {
 
     const payload = { imageDataUrl, videoTime, tabUrl: tab.url, tabTitle: tab.title, capturedAt: Date.now() }
 
-    // 5. Broadcast to the extension iframe (chrome.runtime reaches all extension pages)
-    try {
-      chrome.runtime.sendMessage({ type: 'SCREENSHOT_TAKEN', payload })
-    } catch (_) {}
+    // 5. Broadcast to the extension iframe via chrome.runtime (NOT chrome.tabs.sendMessage)
+    //    chrome.runtime.sendMessage reaches all open extension pages including iframes.
+    try { chrome.runtime.sendMessage({ type: 'SCREENSHOT_TAKEN', payload }) } catch (_) {}
 
-    // 6. Also persist to queue (for when overlay isn't open yet)
+    // 6. Also queue to storage for drain when overlay next opens
     chrome.storage.local.get('nm_screenshot_queue', (result) => {
       const queue = result['nm_screenshot_queue'] ?? []
       queue.push(payload)
@@ -64,27 +55,33 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 })
 
-// ─── Message Router ───────────────────────────────────────────────────────────
+// Message Router
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
-  // ── API version ────────────────────────────────────────────────────────────
+  // API version check
   if (message.type === 'CHECK_API_VERSION') {
     sendResponse(
       message.version !== API_VERSION
-        ? { ok: false, error: `API version mismatch: extension expects v${API_VERSION}, got v${message.version}.`, serverVersion: API_VERSION }
+        ? { ok: false, error: `API version mismatch: expects v${API_VERSION}, got v${message.version}.` }
         : { ok: true, serverVersion: API_VERSION }
     )
     return false
   }
 
-  // ── Tab audio capture via tabCapture (no picker dialog, captures current tab) ──
-  // The iframe sends this; sender.tab.id IS the tab we want to capture.
+  // Tab audio capture via chrome.tabCapture.
+  // The Toolbar sends tabId explicitly because sender.tab is undefined
+  // when the message comes from an extension page (iframe), not a content script.
   if (message.type === 'REQUEST_TAB_AUDIO_STREAM') {
-    const tabId = sender.tab?.id
-    if (!tabId) { sendResponse({ error: 'Cannot determine tab ID. Make sure the extension is running as a page overlay.' }); return false }
+    const tabId = message.tabId
+    if (!tabId) {
+      sendResponse({ error: 'No tabId in REQUEST_TAB_AUDIO_STREAM message.' })
+      return false
+    }
 
+    // Do not set consumerTabId — leaving it out makes the streamId usable
+    // from any extension context (including the iframe extension page).
     chrome.tabCapture.getMediaStreamId(
-      { targetTabId: tabId, consumerTabId: tabId },
+      { targetTabId: tabId },
       (streamId) => {
         if (chrome.runtime.lastError) {
           sendResponse({ error: chrome.runtime.lastError.message })
@@ -93,10 +90,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
     )
-    return true // async
+    return true  // keep message port open for async callback
   }
 
-  // ── Minimize overlay relay ─────────────────────────────────────────────────
+  // Relay minimize command from iframe back to the host tab's content script
   if (message.type === 'MINIMIZE_OVERLAY') {
     const tabId = sender.tab?.id
     if (tabId) {
@@ -110,7 +107,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
-  // ── Persistence ────────────────────────────────────────────────────────────
+  // Persistence helpers
   if (message.type === 'AUTO_SAVE') {
     chrome.storage.local.set({ 'nm_session': message.payload }, () => sendResponse({ ok: true }))
     return true

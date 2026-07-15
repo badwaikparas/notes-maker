@@ -22,7 +22,7 @@ export default function Toolbar({ showToast }) {
   const wsRef                = useRef(null)
   const connectionAttemptRef = useRef(0)
 
-  // Poll active tab for video time and source URL
+  // Poll active tab for video time and source URL while recording
   useEffect(() => {
     if (!transcription.isActive) { videoTimeRef.current = null; return }
     const interval = setInterval(async () => {
@@ -75,39 +75,58 @@ export default function Toolbar({ showToast }) {
   async function startSpeechRecognition() {
     const currentAttempt = ++connectionAttemptRef.current
 
-    // Step 1: Pre-flight check — verify Whisper server is reachable
+    // Step 1: Pre-flight — verify Whisper server is reachable before anything else
     try {
       await new Promise((resolve, reject) => {
         const testWs = new WebSocket('ws://127.0.0.1:5000/ws')
         testWs.onopen = () => { testWs.close(); resolve() }
         testWs.onerror = () => reject(new Error(
-          'Whisper server not running at 127.0.0.1:5000. Start it with: cd local-server && python server.py'
+          'Whisper server not running at 127.0.0.1:5000. Start: cd local-server && python server.py'
         ))
         setTimeout(() => reject(new Error('Connection to Whisper server timed out.')), 3000)
       })
     } catch (err) {
       if (currentAttempt === connectionAttemptRef.current) {
         setTranscriptionError(err.message)
-        showToast('Server not running — see Transcript tab')
+        showToast('Server not running')
       }
       return
     }
 
-    // Step 2: Request audio stream via chrome.tabCapture (background handles this).
-    // Unlike getDisplayMedia:
-    //   • Captures the CURRENT tab (getDisplayMedia always excludes it)
-    //   • No picker dialog shown to the user
-    //   • Works even when the extension is an in-page iframe overlay
+    // Step 2: Get the active tab ID (we need to send it explicitly because
+    // sender.tab is undefined when the message comes from an extension iframe page,
+    // as opposed to a content script).
+    let activeTabId = null
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      activeTabId = activeTab?.id ?? null
+    } catch (_) {}
+
+    if (!activeTabId) {
+      setTranscriptionError('Could not determine the active tab. Try clicking the page first.')
+      return
+    }
+
+    // Step 3: Request a tabCapture stream ID from the background service worker.
+    // tabCapture captures the CURRENT tab audio without any picker dialog.
     let stream
     try {
       const resp = await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({ type: 'REQUEST_TAB_AUDIO_STREAM' }, (r) => {
-          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message))
-          else if (r?.error) reject(new Error(r.error))
-          else resolve(r)
+        // Timeout safety — if the service worker doesn't respond in 5s, fail gracefully
+        const timer = setTimeout(() => reject(new Error('Background service worker did not respond in time.')), 5000)
+        chrome.runtime.sendMessage({ type: 'REQUEST_TAB_AUDIO_STREAM', tabId: activeTabId }, (r) => {
+          clearTimeout(timer)
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message))
+          } else if (r?.error) {
+            reject(new Error(r.error))
+          } else {
+            resolve(r)
+          }
         })
       })
 
+      // Use the streamId returned by the background to open an audio-only MediaStream
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           mandatory: {
@@ -119,7 +138,7 @@ export default function Toolbar({ showToast }) {
       })
     } catch (err) {
       if (currentAttempt === connectionAttemptRef.current) {
-        setTranscriptionError(`Could not capture tab audio: ${err.message}`)
+        setTranscriptionError(`Audio capture failed: ${err.message}`)
         showToast('Audio capture failed — see Transcript tab')
       }
       return
@@ -132,13 +151,14 @@ export default function Toolbar({ showToast }) {
     stream.getAudioTracks()[0].addEventListener('ended', () => { if (wsRef.current) stopSpeechRecognition() })
     streamRef.current = stream
 
-    // Step 3: Auto-capture current tab URL
+    // Step 4: Auto-capture source URL
     try {
+      addSourceUrl(`https://...tab-${activeTabId}`, `Tab ${activeTabId}`)
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (tab?.url && !tab.url.startsWith('chrome')) addSourceUrl(tab.url, tab.title)
     } catch (_) {}
 
-    // Step 4: Set up audio analysis (volume meter)
+    // Step 5: Audio analysis for the volume meter
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 })
     const analyser = audioCtx.createAnalyser()
     analyser.fftSize = 256
@@ -148,7 +168,7 @@ export default function Toolbar({ showToast }) {
     analyserRef.current = analyser
     updateVolumeMeter()
 
-    // Step 5: Connect to Whisper WebSocket
+    // Step 6: Connect to Whisper WebSocket
     const ws = new WebSocket('ws://127.0.0.1:5000/ws')
     wsRef.current = ws
 
@@ -158,14 +178,14 @@ export default function Toolbar({ showToast }) {
     }
     ws.onmessage = handleServerMessage
     ws.onerror = () => {
-      setTranscriptionError('Whisper server connection lost. Is the server still running?')
+      setTranscriptionError('Whisper server connection lost.')
       stopSpeechRecognition()
     }
     ws.onclose = () => {
       if (wsRef.current !== null) stopSpeechRecognition()
     }
 
-    // Step 6: Stream raw audio to Whisper via ScriptProcessor
+    // Step 7: Stream raw audio PCM to the Whisper server
     const processor = audioCtx.createScriptProcessor(4096, 1, 1)
     processor.onaudioprocess = (e) => {
       if (ws.readyState === WebSocket.OPEN) {
