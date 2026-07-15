@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from './store/useNotesStore'
 import { loadSavedSession, saveSession, startAutoSave, stopAutoSave } from './utils/storageManager'
-import { API_VERSION } from '../config/version'
 import Toolbar from './components/Toolbar/Toolbar'
 import TranscriptPanel from './components/TranscriptPanel/TranscriptPanel'
 import ScreenshotGallery from './components/ScreenshotGallery/ScreenshotGallery'
@@ -19,71 +18,66 @@ const TABS = [
 ]
 
 export default function App() {
-  const activeTab          = useNotesStore((s) => s.activeTab)
-  const setActiveTab       = useNotesStore((s) => s.setActiveTab)
-  const loadSession        = useNotesStore((s) => s.loadSession)
-  const clearSession       = useNotesStore((s) => s.clearSession)
-  const addScreenshotBlock = useNotesStore((s) => s.addScreenshotBlock)
+  const activeTab            = useNotesStore((s) => s.activeTab)
+  const setActiveTab         = useNotesStore((s) => s.setActiveTab)
+  const loadSession          = useNotesStore((s) => s.loadSession)
+  const addScreenshotBlock   = useNotesStore((s) => s.addScreenshotBlock)
   const getSerializedSession = useNotesStore((s) => s.getSerializedSession)
 
   const [recoverySession, setRecoverySession] = useState(null)
   const [toast, setToast]                     = useState({ msg: '', show: false })
-  const [apiWarning, setApiWarning]            = useState(null)
   const toastTimer = useRef(null)
 
-  // ── Show toast helper ────────────────────────────────────────────────────
   function showToast(msg, duration = 2500) {
     if (toastTimer.current) clearTimeout(toastTimer.current)
     setToast({ msg, show: true })
     toastTimer.current = setTimeout(() => setToast({ msg: '', show: false }), duration)
   }
 
-  // ── On mount: check for saved session, drain screenshot queue, listen for new ones ───────
+  // Minimize: tell the parent page's content script to hide the overlay
+  function handleMinimize() {
+    try {
+      // When running as an iframe, this posts to the content script indirectly.
+      // The content script injected the iframe and owns the toggle tab.
+      chrome.runtime.sendMessage({ type: 'MINIMIZE_OVERLAY' })
+    } catch (_) {}
+    // Also try parent window message (if same origin — won't work cross-origin, but safe)
+    try { window.parent.postMessage({ type: 'NM_MINIMIZE' }, '*') } catch (_) {}
+  }
+
   useEffect(() => {
-    // 1. Check API version compatibility with background worker
-    chrome.runtime.sendMessage({ type: 'CHECK_API_VERSION', version: API_VERSION }, (resp) => {
-      if (chrome.runtime.lastError) return // background may not be ready yet
-      if (resp && !resp.ok) {
-        setApiWarning(resp.error)
-      }
-    })
-
-    // 2. Check for a saved session to offer recovery
+    // 1. Check for a saved session to offer recovery
     loadSavedSession().then((saved) => {
-      if (saved && saved.blocks?.length > 0) {
-        setRecoverySession(saved)
-      }
+      if (saved?.blocks?.length > 0) setRecoverySession(saved)
     })
 
-    // 3. Drain any screenshots captured while the panel was closed
+    // 2. Drain screenshots queued while overlay was hidden
     chrome.runtime.sendMessage({ type: 'DRAIN_SCREENSHOT_QUEUE' }, (resp) => {
       if (chrome.runtime.lastError) return
       const queue = resp?.queue ?? []
       if (queue.length > 0) {
-        queue.forEach(({ imageDataUrl, videoTime }) => {
-          addScreenshotBlock(imageDataUrl, videoTime)
-        })
-        showToast(`📸 ${queue.length} screenshot${queue.length > 1 ? 's' : ''} restored from queue`)
+        queue.forEach(({ imageDataUrl, videoTime }) => addScreenshotBlock(imageDataUrl, videoTime))
+        showToast(`📸 ${queue.length} screenshot${queue.length > 1 ? 's' : ''} restored`)
       }
     })
 
-    // 4. Listen for SCREENSHOT_TAKEN from the background worker (panel is open)
+    // 3. Listen for SCREENSHOT_TAKEN (sent by background → content script → here via chrome.runtime)
     function handleMessage(message) {
       if (message.type === 'SCREENSHOT_TAKEN') {
         const { imageDataUrl, videoTime } = message.payload
         addScreenshotBlock(imageDataUrl, videoTime)
         showToast('📸 Screenshot captured!')
       }
+      // Content script can tell us to minimize
+      if (message.type === 'MINIMIZE_OVERLAY') {
+        // No-op here; the content script handles the visual hide
+      }
     }
     chrome.runtime.onMessage.addListener(handleMessage)
 
-    // 5. Auto-save every N seconds
+    // 4. Auto-save
     startAutoSave(getSerializedSession)
-
-    // 6. Save on tab/window close
-    window.addEventListener('beforeunload', () => {
-      saveSession(getSerializedSession())
-    })
+    window.addEventListener('beforeunload', () => saveSession(getSerializedSession()))
 
     return () => {
       chrome.runtime.onMessage.removeListener(handleMessage)
@@ -91,36 +85,30 @@ export default function App() {
     }
   }, [])
 
-  function handleRestoreSession() {
-    loadSession(recoverySession)
-    setRecoverySession(null)
-    showToast('✅ Session restored!')
-  }
-
-  function handleDiscardSession() {
-    setRecoverySession(null)
-  }
-
   return (
     <div className="app">
-      {/* ── API Version Warning ── */}
-      {apiWarning && (
-        <div className="api-warning">
-          ⚠️ {apiWarning}
-          <button className="btn-icon" onClick={() => setApiWarning(null)} style={{ marginLeft: 8 }}>✕</button>
-        </div>
-      )}
-
-      {/* ── Header ── */}
+      {/* Header */}
       <header className="app-header">
         <div className="app-logo">
           <span className="app-logo-icon">◈</span>
           <span className="app-logo-text">NotesMaker</span>
         </div>
-        <Toolbar showToast={showToast} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Toolbar showToast={showToast} />
+          {/* Minimize arrow — collapses the overlay back to the tab */}
+          <button
+            id="btn-minimize-overlay"
+            className="btn-icon"
+            onClick={handleMinimize}
+            title="Minimize panel (▶ tab stays on the right)"
+            style={{ fontSize: '16px', opacity: 0.7 }}
+          >
+            ▶
+          </button>
+        </div>
       </header>
 
-      {/* ── Session Recovery Banner ── */}
+      {/* Session Recovery Banner */}
       {recoverySession && (
         <div className="recovery-banner animate-fade-in">
           <div className="recovery-banner-info">
@@ -134,17 +122,25 @@ export default function App() {
             </span>
           </div>
           <div className="recovery-actions">
-            <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={handleRestoreSession}>
+            <button
+              className="btn btn-primary"
+              style={{ padding: '4px 10px', fontSize: '11px' }}
+              onClick={() => { loadSession(recoverySession); setRecoverySession(null); showToast('✅ Session restored!') }}
+            >
               Restore
             </button>
-            <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={handleDiscardSession}>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: '4px 10px', fontSize: '11px' }}
+              onClick={() => setRecoverySession(null)}
+            >
               Discard
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Tab Nav ── */}
+      {/* Tab Nav */}
       <nav className="tab-nav">
         {TABS.map((tab) => (
           <button
@@ -160,7 +156,7 @@ export default function App() {
         ))}
       </nav>
 
-      {/* ── Tab Content ── */}
+      {/* Tab Content */}
       <main className="tab-content">
         {activeTab === 'transcript'  && <TranscriptPanel showToast={showToast} />}
         {activeTab === 'notes'       && <NotesPreview showToast={showToast} />}
@@ -169,7 +165,7 @@ export default function App() {
         {activeTab === 'settings'    && <Settings />}
       </main>
 
-      {/* ── Toast ── */}
+      {/* Toast */}
       <div className={`toast ${toast.show ? 'show' : ''}`}>{toast.msg}</div>
     </div>
   )

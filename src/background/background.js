@@ -1,19 +1,20 @@
 /**
  * Background Service Worker
- * Handles: tab audio capture, screenshot command, auto-save heartbeat,
- * and message routing between content script ↔ side panel.
  *
- * Key design: screenshots are saved to chrome.storage.local as a queue so they
- * are never lost even if the side panel is closed when the shortcut fires.
- * The side panel drains this queue on mount and on every SCREENSHOT_TAKEN message.
+ * Key responsibilities:
+ *  - Handle screenshot command (Ctrl+Shift+S)
+ *  - Queue screenshots for delivery when the overlay may not be ready
+ *  - Route messages between content script / overlay iframe and the extension
+ *  - API version checks
+ *  - Auto-save support
+ *
+ * Architecture note: the UI now runs as an iframe overlay injected by the
+ * content script, NOT inside the Chrome side panel. This means the UI
+ * stays alive as long as the page is open — closing the Chrome sidebar
+ * has no effect.
  */
 
 import { API_VERSION } from '../config/version.js'
-
-// ─── Side Panel Setup ────────────────────────────────────────────────────────
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch(console.error)
 
 // ─── Screenshot Command ───────────────────────────────────────────────────────
 chrome.commands.onCommand.addListener(async (command) => {
@@ -23,41 +24,27 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (!tab) return
 
   try {
-    // 1. Capture the visible tab as a PNG data URL
-    const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: 'png',
-    })
+    const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
 
-    // 2. Ask the content script for the current video timestamp
+    // Ask content script for current video time
     let videoTime = null
     try {
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'GET_VIDEO_TIME',
-      })
-      videoTime = response?.currentTime ?? null
-    } catch (_) {
-      // page may not have a video — that's fine
-    }
+      const res = await chrome.tabs.sendMessage(tab.id, { type: 'GET_VIDEO_TIME' })
+      videoTime = res?.currentTime ?? null
+    } catch (_) {}
 
     const payload = { imageDataUrl, videoTime, tabUrl: tab.url, tabTitle: tab.title }
 
-    // 3. Forward screenshot + timestamp to the side panel (best-effort)
+    // Send directly to the overlay (via content-script → iframe postMessage relay)
     try {
-      chrome.runtime.sendMessage({
-        type: 'SCREENSHOT_TAKEN',
-        payload,
-      })
-    } catch (_) {
-      // Side panel may be closed — that's OK, we queue it below
-    }
+      chrome.tabs.sendMessage(tab.id, { type: 'SCREENSHOT_TAKEN', payload })
+    } catch (_) {}
 
-    // 4. Always persist to a queue so the side panel can drain it on next open
+    // Also persist to queue so the overlay can drain it on next open
     chrome.storage.local.get('nm_screenshot_queue', (result) => {
       const queue = result['nm_screenshot_queue'] ?? []
       queue.push({ ...payload, capturedAt: Date.now() })
-      // Keep at most 50 queued screenshots to avoid exceeding storage quota
-      const trimmed = queue.slice(-50)
-      chrome.storage.local.set({ 'nm_screenshot_queue': trimmed })
+      chrome.storage.local.set({ 'nm_screenshot_queue': queue.slice(-50) })
     })
   } catch (err) {
     console.error('[NotesMaker] Screenshot failed:', err)
@@ -67,15 +54,12 @@ chrome.commands.onCommand.addListener(async (command) => {
 // ─── Message Router ───────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
-  // ── API version handshake ─────────────────────────────────────────────────
-  // Any context that wants to talk to us should send its API_VERSION.
-  // We reject mismatched versions to prevent subtle breakage across upgrades.
+  // API version handshake
   if (message.type === 'CHECK_API_VERSION') {
-    const clientVersion = message.version
-    if (clientVersion !== API_VERSION) {
+    if (message.version !== API_VERSION) {
       sendResponse({
         ok: false,
-        error: `API version mismatch: extension expects v${API_VERSION}, client sent v${clientVersion}. Please reload the extension.`,
+        error: `API version mismatch: extension expects v${API_VERSION}, got v${message.version}. Please reload.`,
         serverVersion: API_VERSION,
       })
     } else {
@@ -84,77 +68,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
+  // Tab stream ID for audio capture
   if (message.type === 'REQUEST_TAB_STREAM_ID') {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (!tab) {
-        sendResponse({ error: 'No active tab' })
-        return
-      }
-      // getMediaStreamId is the MV3-safe way to hand tab audio to another context
-      chrome.tabCapture.getMediaStreamId(
-        { consumerTabId: tab.id },
-        (streamId) => {
-          if (chrome.runtime.lastError) {
-            sendResponse({ error: chrome.runtime.lastError.message })
-          } else {
-            sendResponse({ streamId })
-          }
+      if (!tab) { sendResponse({ error: 'No active tab' }); return }
+      chrome.tabCapture.getMediaStreamId({ consumerTabId: tab.id }, (streamId) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ error: chrome.runtime.lastError.message })
+        } else {
+          sendResponse({ streamId })
         }
-      )
-    })
-    return true // keep channel open for async sendResponse
-  }
-
-  // Relay GET_VIDEO_INFO from side panel → content script of active tab
-  if (message.type === 'GET_VIDEO_INFO') {
-    chrome.tabs.query({ active: true, currentWindow: true }, async ([tab]) => {
-      if (!tab) { sendResponse({}); return }
-      try {
-        const info = await chrome.tabs.sendMessage(tab.id, { type: 'GET_VIDEO_INFO' })
-        sendResponse(info)
-      } catch {
-        sendResponse({})
-      }
+      })
     })
     return true
   }
 
-  // Auto-save: side panel sends its serialised state; we persist it
+  // Auto-save
   if (message.type === 'AUTO_SAVE') {
-    chrome.storage.local.set({ 'nm_session': message.payload }, () => {
-      sendResponse({ ok: true })
-    })
+    chrome.storage.local.set({ 'nm_session': message.payload }, () => sendResponse({ ok: true }))
     return true
   }
 
-  // Load saved session on demand
+  // Load saved session
   if (message.type === 'LOAD_SESSION') {
-    chrome.storage.local.get('nm_session', (result) => {
-      sendResponse({ session: result['nm_session'] ?? null })
-    })
+    chrome.storage.local.get('nm_session', (result) => sendResponse({ session: result['nm_session'] ?? null }))
     return true
   }
 
-  // Clear saved session
+  // Clear session
   if (message.type === 'CLEAR_SESSION') {
     chrome.storage.local.remove('nm_session', () => sendResponse({ ok: true }))
     return true
   }
 
-  // Side panel drains the screenshot queue on mount
+  // Drain screenshot queue
   if (message.type === 'DRAIN_SCREENSHOT_QUEUE') {
     chrome.storage.local.get('nm_screenshot_queue', (result) => {
       const queue = result['nm_screenshot_queue'] ?? []
-      chrome.storage.local.remove('nm_screenshot_queue', () => {
-        sendResponse({ queue })
-      })
+      chrome.storage.local.remove('nm_screenshot_queue', () => sendResponse({ queue }))
     })
     return true
   }
+
+  // Minimize overlay — relayed from the iframe to the content script of its host tab
+  if (message.type === 'MINIMIZE_OVERLAY') {
+    const tabId = sender.tab?.id
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, { type: 'MINIMIZE_OVERLAY' })
+    } else {
+      // Fallback: try active tab
+      chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+        if (tab) chrome.tabs.sendMessage(tab.id, { type: 'MINIMIZE_OVERLAY' })
+      })
+    }
+    sendResponse({ ok: true })
+    return false
+  }
 })
 
-// ─── Final save when tab closes ──────────────────────────────────────────────
-// The side panel itself sends an AUTO_SAVE before unload; this is a safety net.
-chrome.tabs.onRemoved.addListener(() => {
-  // Nothing extra needed — the side panel's beforeunload handler does the save.
-})

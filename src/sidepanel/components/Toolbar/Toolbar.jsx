@@ -70,18 +70,10 @@ export default function Toolbar({ showToast }) {
     let data
     try { data = JSON.parse(event.data) } catch { return }
 
-    if (data.type === 'error') {
-      setTranscriptionError(`Server: ${data.message}`)
-      stopSpeechRecognition()
-      return
-    }
-    if (data.type === 'handshake_ok' || data.type === 'pong') return
-
     if (data.type === 'interim') {
       setInterimText(data.text)
     } else if (data.type === 'final') {
       setInterimText('')
-      // Commit as a single block — server already sends one segment per message
       if (data.text?.trim()) {
         addTranscriptBlock(data.text.trim(), videoTimeRef.current)
       }
@@ -163,12 +155,8 @@ export default function Toolbar({ showToast }) {
     wsRef.current = ws
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'handshake', version: 1 }))
       setTranscriptionActive(true)
       showToast('🎙️ Connected to Whisper server!')
-      keepAliveRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
-      }, 10_000)
     }
 
     ws.onmessage = handleServerMessage

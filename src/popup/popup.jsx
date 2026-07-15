@@ -2,9 +2,12 @@ import ReactDOM from 'react-dom/client'
 import './popup.css'
 
 function Popup() {
-  function openSidePanel() {
+  function toggleOverlay() {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      chrome.sidePanel.open({ tabId: tab.id })
+      chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_OVERLAY' }, () => {
+        // Ignore errors (page may not have loaded content script yet)
+        void chrome.runtime.lastError
+      })
       window.close()
     })
   }
@@ -23,20 +26,24 @@ function Popup() {
 
       <p className="popup-sub">AI-assisted note-taking for video courses</p>
 
-      <button id="btn-open-panel" className="popup-primary-btn" onClick={openSidePanel}>
-        Open Side Panel
-        <span className="popup-btn-arrow">→</span>
+      <button id="btn-toggle-overlay" className="popup-primary-btn" onClick={toggleOverlay}>
+        Toggle Panel
+        <span className="popup-btn-arrow">⇄</span>
       </button>
 
       <div className="popup-divider" />
 
       <div className="popup-tip">
         <span>📸</span>
-        <span>Press <kbd>Ctrl+Shift+S</kbd> to capture a screenshot while watching</span>
+        <span>Press <kbd>Ctrl+Shift+S</kbd> to capture a screenshot</span>
       </div>
       <div className="popup-tip">
         <span>⌨️</span>
         <button className="popup-link" onClick={openShortcuts}>Customise shortcuts</button>
+      </div>
+      <div className="popup-tip" style={{ fontSize: '10px', opacity: 0.6 }}>
+        <span>💡</span>
+        <span>The panel lives inside the page — works even with the sidebar closed</span>
       </div>
     </div>
   )
