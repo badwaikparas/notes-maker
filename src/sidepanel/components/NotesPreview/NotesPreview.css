@@ -38,6 +38,11 @@
   gap: 6px;
   flex-shrink: 0;
 }
+.btn-active {
+  background: var(--primary-dim) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--border-active) !important;
+}
 
 .notes-empty {
   display: flex;
@@ -77,7 +82,7 @@
 .frontmatter-link { text-decoration: none; }
 .frontmatter-link:hover { border-color: var(--border-active); color: var(--primary-hover); }
 
-.notes-blocks { display: flex; flex-direction: column; gap: 4px; }
+.notes-blocks { display: flex; flex-direction: column; gap: 2px; }
 
 /* ── Individual note block ── */
 .notes-block {
@@ -86,24 +91,97 @@
   transition: background var(--transition);
 }
 .notes-block:hover { background: var(--glass-hover); }
-.notes-block-del, .notes-block-remove {
-  opacity: 0;
+.notes-block.editing { background: rgba(99, 102, 241, 0.05) !important; }
+
+.notes-block-actions {
+  display: flex;
+  gap: 2px;
   position: absolute;
-  top: 6px;
+  top: 4px;
   right: 6px;
+  opacity: 0;
   transition: opacity var(--transition);
 }
-.notes-block:hover .notes-block-del,
-.notes-block:hover .notes-block-remove { opacity: 1; }
+.notes-block:hover .notes-block-actions { opacity: 1; }
 
 /* Text block */
 .notes-block-text {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 30px 6px 8px;
+  padding: 6px 70px 6px 8px;
   border-left: 2px solid var(--primary-dim);
+  cursor: default;
 }
+.notes-block-text:hover { border-left-color: var(--primary); }
+
+/* ── Editor ── */
+.notes-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.md-textarea {
+  width: 100%;
+  min-height: 48px;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 8px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-dim);
+}
+.md-textarea:focus {
+  border-color: var(--primary);
+}
+.notes-editor-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* ── Rendered markdown ── */
+.notes-rendered { display: flex; flex-direction: column; gap: 2px; }
+.notes-raw-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Markdown elements */
+.md-h1 { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 2px 0; }
+.md-h2 { font-size: 13px; font-weight: 700; color: var(--primary-hover); margin: 2px 0; }
+.md-h3 { font-size: 12px; font-weight: 600; color: var(--accent); margin: 2px 0; }
+.md-p  { font-size: 12.5px; line-height: 1.65; color: var(--text-primary); }
+.md-blockquote {
+  border-left: 2px solid var(--primary);
+  padding-left: 8px;
+  color: var(--primary-hover);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+.md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 6px 0;
+}
+.md-li { font-size: 12.5px; line-height: 1.65; color: var(--text-primary); padding-left: 12px; list-style: disc; }
+.md-spacer { height: 6px; }
+.md-inline-code {
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+.md-link { color: var(--primary-hover); text-decoration: underline; }
 .notes-ts {
   font-size: 10px;
   font-family: var(--font-mono);
@@ -111,12 +189,6 @@
   font-weight: 600;
   flex-shrink: 0;
   margin-top: 2px;
-}
-.notes-block-p {
-  font-size: 12.5px;
-  line-height: 1.65;
-  color: var(--text-primary);
-  flex: 1;
 }
 
 /* Screenshot block */
@@ -150,18 +222,8 @@
   padding: 4px 8px;
   border-top: 1px solid var(--border);
 }
-
-/* Heading block */
-.notes-block-heading {
-  padding: 6px 30px 4px 8px;
-  display: flex;
-  align-items: center;
+.notes-block-remove {
+  opacity: 0;
+  transition: opacity var(--transition);
 }
-.notes-heading {
-  color: var(--text-primary);
-  font-weight: 700;
-  flex: 1;
-}
-.notes-heading.h1 { font-size: 16px; }
-.notes-heading.h2 { font-size: 14px; color: var(--primary-hover); }
-.notes-heading.h3 { font-size: 12px; color: var(--accent); }
+.notes-block:hover .notes-block-remove { opacity: 1; }

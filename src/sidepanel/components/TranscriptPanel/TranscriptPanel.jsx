@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useNotesStore } from '../../store/useNotesStore'
 import TranscriptSentence from './TranscriptSentence'
 import './TranscriptPanel.css'
+// Note: Screenshots are NOT rendered inline in the transcript.
+// anchoredToId is preserved on screenshot blocks for export ordering only.
 
 export default function TranscriptPanel({ showToast }) {
   const blocks       = useNotesStore((s) => s.blocks)
@@ -66,21 +68,14 @@ export default function TranscriptPanel({ showToast }) {
 
       {/* ── Sentence list ── */}
       <div className="transcript-list" ref={listRef}>
-        {transcriptBlocks.map((block, idx) => {
-          // Find any screenshots anchored to this sentence
-          const anchored = blocks.filter(
-            (b) => b.type === 'screenshot' && b.anchoredToId === block.id
-          )
-          return (
-            <TranscriptSentence
-              key={block.id}
-              block={block}
-              index={idx}
-              anchoredScreenshots={anchored}
-              showToast={showToast}
-            />
-          )
-        })}
+        {transcriptBlocks.map((block, idx) => (
+          <TranscriptSentence
+            key={block.id}
+            block={block}
+            index={idx}
+            showToast={showToast}
+          />
+        ))}
 
         {/* ── Interim (in-progress) sentence ── */}
         {transcription.interimText && (

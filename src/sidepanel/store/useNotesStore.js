@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid'
  *
  * Transcript: { id, type:'transcript', timestamp, text, addedToNotes, selected }
  * Screenshot: { id, type:'screenshot', timestamp, imageDataUrl, caption, anchoredToId, addedToNotes }
- * Heading:    { id, type:'heading', text, level }
  * Manual:     { id, type:'manual', text, addedToNotes }
  */
 
@@ -16,6 +15,7 @@ const DEFAULT_SETTINGS = {
   whisperApiKey: '',
   autoSaveInterval: 30,          // seconds
   autoAddScreenshotsToNotes: true,
+  deleteScreenshotFromGalleryOnNotesRemoval: false, // new setting
   noteHeadingLevel: 'h2',
   screenshotQuality: 0.85,
 }
@@ -49,6 +49,15 @@ export const useNotesStore = create((set, get) => ({
 
   // ── Settings ─────────────────────────────────────────────────────────────
   settings: DEFAULT_SETTINGS,
+
+  // ── Export metadata overrides (tags + source URL) ─────────────────────
+  exportMeta: {
+    tags: ['notes', 'course'],
+    sourceOverride: '',  // if set, overrides session.videoUrl
+  },
+
+  // ── Previously used tags (persisted for suggestions) ─────────────────────
+  usedTags: ['notes', 'course'],
 
   // ── Session metadata ─────────────────────────────────────────────────────
   setVideoInfo: (url, title) =>
@@ -132,19 +141,33 @@ export const useNotesStore = create((set, get) => ({
       blocks: s.blocks.map((b) => (b.id === id ? { ...b, addedToNotes: true } : b)),
     })),
 
-  removeFromNotes: (id) =>
-    set((s) => ({
-      blocks: s.blocks.map((b) => (b.id === id ? { ...b, addedToNotes: false } : b)),
-    })),
+  removeFromNotes: (id) => {
+    const { settings, blocks } = get()
+    const block = blocks.find((b) => b.id === id)
+    if (!block) return
+
+    // If it's a screenshot and the setting is enabled, delete it entirely
+    if (block.type === 'screenshot' && settings.deleteScreenshotFromGalleryOnNotesRemoval) {
+      set((s) => ({ blocks: s.blocks.filter((b) => b.id !== id) }))
+    } else {
+      set((s) => ({
+        blocks: s.blocks.map((b) => (b.id === id ? { ...b, addedToNotes: false } : b)),
+      }))
+    }
+  },
 
   toggleInNotes: (id) => {
     const block = get().blocks.find((b) => b.id === id)
     if (!block) return
-    set((s) => ({
-      blocks: s.blocks.map((b) =>
-        b.id === id ? { ...b, addedToNotes: !b.addedToNotes } : b
-      ),
-    }))
+    if (block.addedToNotes) {
+      get().removeFromNotes(id)
+    } else {
+      set((s) => ({
+        blocks: s.blocks.map((b) =>
+          b.id === id ? { ...b, addedToNotes: true } : b
+        ),
+      }))
+    }
   },
 
   addAllSelectedToNotes: () => {
@@ -155,6 +178,21 @@ export const useNotesStore = create((set, get) => ({
       ),
     }))
   },
+
+  // Add all transcript blocks to notes at once
+  addAllTranscriptToNotes: () => {
+    set((s) => ({
+      blocks: s.blocks.map((b) =>
+        b.type === 'transcript' ? { ...b, addedToNotes: true } : b
+      ),
+    }))
+  },
+
+  // ── Edit block text ───────────────────────────────────────────────────────
+  updateBlockText: (id, text) =>
+    set((s) => ({
+      blocks: s.blocks.map((b) => (b.id === id ? { ...b, text } : b)),
+    })),
 
   // ── Selection ────────────────────────────────────────────────────────────
   toggleSelect: (id) => {
@@ -195,11 +233,16 @@ export const useNotesStore = create((set, get) => ({
       .join('\n')
   },
 
-  // ── Notes blocks (headings, manual text) ─────────────────────────────────
-  addHeading: (text, level = 'h2') => {
-    const block = { id: uuidv4(), type: 'heading', text, level, addedToNotes: true }
-    set((s) => ({ blocks: [...s.blocks, block] }))
-  },
+  // ── Export metadata ───────────────────────────────────────────────────────
+  setExportTags: (tags) =>
+    set((s) => ({
+      exportMeta: { ...s.exportMeta, tags },
+      // Accumulate used tags for suggestions
+      usedTags: [...new Set([...s.usedTags, ...tags])],
+    })),
+
+  setSourceOverride: (sourceOverride) =>
+    set((s) => ({ exportMeta: { ...s.exportMeta, sourceOverride } })),
 
   // ── UI ────────────────────────────────────────────────────────────────────
   setActiveTab: (activeTab) => set({ activeTab }),
@@ -211,10 +254,8 @@ export const useNotesStore = create((set, get) => ({
 
   // ── Persistence ──────────────────────────────────────────────────────────
   getSerializedSession: () => {
-    const { session, blocks, settings } = get()
-    // Don't store image data in base64 during normal auto-save
-    // (screenshots are stored as-is since storage.local allows ~10MB)
-    return { session, blocks, settings, savedAt: new Date().toISOString() }
+    const { session, blocks, settings, exportMeta, usedTags } = get()
+    return { session, blocks, settings, exportMeta, usedTags, savedAt: new Date().toISOString() }
   },
 
   loadSession: (saved) => {
@@ -223,6 +264,8 @@ export const useNotesStore = create((set, get) => ({
       session: saved.session ?? get().session,
       blocks: saved.blocks ?? [],
       settings: { ...DEFAULT_SETTINGS, ...(saved.settings ?? {}) },
+      exportMeta: saved.exportMeta ?? get().exportMeta,
+      usedTags: saved.usedTags ?? get().usedTags,
     })
   },
 
@@ -232,6 +275,7 @@ export const useNotesStore = create((set, get) => ({
       blocks: [],
       selectedIds: new Set(),
       transcription: { isActive: false, interimText: '', error: null },
+      exportMeta: { tags: ['notes', 'course'], sourceOverride: '' },
     }),
 
   // Get only the blocks marked for notes, in the correct contextual order

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from './store/useNotesStore'
 import { loadSavedSession, saveSession, startAutoSave, stopAutoSave } from './utils/storageManager'
+import { API_VERSION } from '../config/version'
 import Toolbar from './components/Toolbar/Toolbar'
 import TranscriptPanel from './components/TranscriptPanel/TranscriptPanel'
 import ScreenshotGallery from './components/ScreenshotGallery/ScreenshotGallery'
@@ -27,6 +28,7 @@ export default function App() {
 
   const [recoverySession, setRecoverySession] = useState(null)
   const [toast, setToast]                     = useState({ msg: '', show: false })
+  const [apiWarning, setApiWarning]            = useState(null)
   const toastTimer = useRef(null)
 
   // ── Show toast helper ────────────────────────────────────────────────────
@@ -36,16 +38,36 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast({ msg: '', show: false }), duration)
   }
 
-  // ── On mount: check for saved session + listen for screenshots ───────────
+  // ── On mount: check for saved session, drain screenshot queue, listen for new ones ───────
   useEffect(() => {
-    // 1. Check for a saved session to offer recovery
+    // 1. Check API version compatibility with background worker
+    chrome.runtime.sendMessage({ type: 'CHECK_API_VERSION', version: API_VERSION }, (resp) => {
+      if (chrome.runtime.lastError) return // background may not be ready yet
+      if (resp && !resp.ok) {
+        setApiWarning(resp.error)
+      }
+    })
+
+    // 2. Check for a saved session to offer recovery
     loadSavedSession().then((saved) => {
       if (saved && saved.blocks?.length > 0) {
         setRecoverySession(saved)
       }
     })
 
-    // 2. Listen for SCREENSHOT_TAKEN from the background worker
+    // 3. Drain any screenshots captured while the panel was closed
+    chrome.runtime.sendMessage({ type: 'DRAIN_SCREENSHOT_QUEUE' }, (resp) => {
+      if (chrome.runtime.lastError) return
+      const queue = resp?.queue ?? []
+      if (queue.length > 0) {
+        queue.forEach(({ imageDataUrl, videoTime }) => {
+          addScreenshotBlock(imageDataUrl, videoTime)
+        })
+        showToast(`📸 ${queue.length} screenshot${queue.length > 1 ? 's' : ''} restored from queue`)
+      }
+    })
+
+    // 4. Listen for SCREENSHOT_TAKEN from the background worker (panel is open)
     function handleMessage(message) {
       if (message.type === 'SCREENSHOT_TAKEN') {
         const { imageDataUrl, videoTime } = message.payload
@@ -55,10 +77,10 @@ export default function App() {
     }
     chrome.runtime.onMessage.addListener(handleMessage)
 
-    // 3. Auto-save every N seconds
+    // 5. Auto-save every N seconds
     startAutoSave(getSerializedSession)
 
-    // 4. Save on tab/window close
+    // 6. Save on tab/window close
     window.addEventListener('beforeunload', () => {
       saveSession(getSerializedSession())
     })
@@ -81,6 +103,14 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* ── API Version Warning ── */}
+      {apiWarning && (
+        <div className="api-warning">
+          ⚠️ {apiWarning}
+          <button className="btn-icon" onClick={() => setApiWarning(null)} style={{ marginLeft: 8 }}>✕</button>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <header className="app-header">
         <div className="app-logo">

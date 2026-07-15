@@ -2,7 +2,13 @@
  * Background Service Worker
  * Handles: tab audio capture, screenshot command, auto-save heartbeat,
  * and message routing between content script ↔ side panel.
+ *
+ * Key design: screenshots are saved to chrome.storage.local as a queue so they
+ * are never lost even if the side panel is closed when the shortcut fires.
+ * The side panel drains this queue on mount and on every SCREENSHOT_TAKEN message.
  */
+
+import { API_VERSION } from '../config/version.js'
 
 // ─── Side Panel Setup ────────────────────────────────────────────────────────
 chrome.sidePanel
@@ -33,19 +39,51 @@ chrome.commands.onCommand.addListener(async (command) => {
       // page may not have a video — that's fine
     }
 
-    // 3. Forward screenshot + timestamp to the side panel
-    chrome.runtime.sendMessage({
-      type: 'SCREENSHOT_TAKEN',
-      payload: { imageDataUrl, videoTime, tabUrl: tab.url, tabTitle: tab.title },
+    const payload = { imageDataUrl, videoTime, tabUrl: tab.url, tabTitle: tab.title }
+
+    // 3. Forward screenshot + timestamp to the side panel (best-effort)
+    try {
+      chrome.runtime.sendMessage({
+        type: 'SCREENSHOT_TAKEN',
+        payload,
+      })
+    } catch (_) {
+      // Side panel may be closed — that's OK, we queue it below
+    }
+
+    // 4. Always persist to a queue so the side panel can drain it on next open
+    chrome.storage.local.get('nm_screenshot_queue', (result) => {
+      const queue = result['nm_screenshot_queue'] ?? []
+      queue.push({ ...payload, capturedAt: Date.now() })
+      // Keep at most 50 queued screenshots to avoid exceeding storage quota
+      const trimmed = queue.slice(-50)
+      chrome.storage.local.set({ 'nm_screenshot_queue': trimmed })
     })
   } catch (err) {
     console.error('[NotesMaker] Screenshot failed:', err)
   }
 })
 
-// ─── Tab Audio Stream ID ──────────────────────────────────────────────────────
-// The side panel asks for a stream ID so it can capture tab audio itself.
+// ─── Message Router ───────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+  // ── API version handshake ─────────────────────────────────────────────────
+  // Any context that wants to talk to us should send its API_VERSION.
+  // We reject mismatched versions to prevent subtle breakage across upgrades.
+  if (message.type === 'CHECK_API_VERSION') {
+    const clientVersion = message.version
+    if (clientVersion !== API_VERSION) {
+      sendResponse({
+        ok: false,
+        error: `API version mismatch: extension expects v${API_VERSION}, client sent v${clientVersion}. Please reload the extension.`,
+        serverVersion: API_VERSION,
+      })
+    } else {
+      sendResponse({ ok: true, serverVersion: API_VERSION })
+    }
+    return false
+  }
+
   if (message.type === 'REQUEST_TAB_STREAM_ID') {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
       if (!tab) {
@@ -100,6 +138,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Clear saved session
   if (message.type === 'CLEAR_SESSION') {
     chrome.storage.local.remove('nm_session', () => sendResponse({ ok: true }))
+    return true
+  }
+
+  // Side panel drains the screenshot queue on mount
+  if (message.type === 'DRAIN_SCREENSHOT_QUEUE') {
+    chrome.storage.local.get('nm_screenshot_queue', (result) => {
+      const queue = result['nm_screenshot_queue'] ?? []
+      chrome.storage.local.remove('nm_screenshot_queue', () => {
+        sendResponse({ queue })
+      })
+    })
     return true
   }
 })

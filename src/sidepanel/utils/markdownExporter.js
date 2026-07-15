@@ -28,15 +28,19 @@ export function buildMarkdown(session, blocks, settings) {
 
   const date = new Date(session.createdAt).toISOString().split('T')[0]
   const title = session.videoTitle || 'Course Notes'
+  const tags = (settings.exportTags && settings.exportTags.length > 0)
+    ? settings.exportTags.join(', ')
+    : 'notes, course'
 
   const frontmatter = [
     '---',
     `title: "${title}"`,
     `date: ${date}`,
-    `tags: [notes, course]`,
+    `tags: [${tags}]`,
     session.videoUrl ? `source: "${session.videoUrl}"` : '',
     '---',
   ].filter(Boolean).join('\n')
+
 
   const header = `\n# ${title}\n`
 

@@ -24,6 +24,8 @@ export default function Toolbar({ showToast }) {
   const volumeBarRef   = useRef(null)
   const wsRef          = useRef(null)
   const connectionAttemptRef = useRef(0)
+  // Keep-alive interval so the WS stays open even if the side panel is backgrounded
+  const keepAliveRef   = useRef(null)
 
   // ── Poll content script for video time while transcription is active ────
   useEffect(() => {
@@ -65,6 +67,45 @@ export default function Toolbar({ showToast }) {
     if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
     if (volumeBarRef.current) { volumeBarRef.current.style.transform = 'scaleX(0)' }
+    if (keepAliveRef.current) { clearInterval(keepAliveRef.current); keepAliveRef.current = null }
+  }
+
+  /**
+   * Parse a server message and commit lines one-by-one.
+   * The local Whisper server sometimes returns multi-line text in a single "final" event.
+   * We split on newlines and commit each non-empty line as its own transcript block.
+   */
+  function handleServerMessage(event) {
+    let data
+    try {
+      data = JSON.parse(event.data)
+    } catch {
+      return
+    }
+
+    if (data.type === 'error') {
+      // Server sent an error (e.g. API version mismatch)
+      setTranscriptionError(`Server error: ${data.message}`)
+      stopSpeechRecognition()
+      return
+    }
+
+    if (data.type === 'handshake_ok' || data.type === 'pong') {
+      // Ignore handshake confirmation and keep-alive responses
+      return
+    }
+
+    if (data.type === 'interim') {
+      setInterimText(data.text)
+    } else if (data.type === 'final') {
+      setInterimText('')
+      const rawText = data.text ?? ''
+      // Split by newlines, trim, filter blanks, then commit each as its own block
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
+      for (const line of lines) {
+        addTranscriptBlock(line, videoTimeRef.current)
+      }
+    }
   }
 
   // ── Local Python Server WebSocket Logic ──────────────────────────────────
@@ -94,12 +135,18 @@ export default function Toolbar({ showToast }) {
       // 2. Kill the video track instantly so we only keep audio and don't waste resources
       stream.getVideoTracks().forEach(t => t.stop())
 
+      // If the audio stream ends unexpectedly (e.g., user closed the sharing banner),
+      // stop transcription gracefully
+      stream.getAudioTracks()[0].addEventListener('ended', () => {
+        if (wsRef.current) stopSpeechRecognition()
+      })
+
       streamRef.current = stream
 
-      // 2. Set up AudioContext locked to 16,000 Hz for Whisper compatibility
+      // 3. Set up AudioContext locked to 16,000 Hz for Whisper compatibility
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 })
       
-      // 3. Set up Volume Analyser
+      // 4. Set up Volume Analyser
       const analyser = audioCtx.createAnalyser()
       analyser.fftSize = 256
       const source = audioCtx.createMediaStreamSource(stream)
@@ -110,24 +157,26 @@ export default function Toolbar({ showToast }) {
       analyserRef.current = analyser
       updateVolumeMeter()
 
-      // 4. Connect to local Python server
+      // 5. Connect to local Python server
       const ws = new WebSocket('ws://127.0.0.1:5000/ws')
       wsRef.current = ws
 
       ws.onopen = () => {
+        // Send API version handshake first
+        ws.send(JSON.stringify({ type: 'handshake', version: 1 }))
         setTranscriptionActive(true)
         showToast('🎙️ Connected to local Whisper server!')
+
+        // Keep-alive ping every 10 s so the WS is not dropped when the
+        // side panel is backgrounded / collapsed
+        keepAliveRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }))
+          }
+        }, 10_000)
       }
 
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        if (data.type === 'interim') {
-          setInterimText(data.text)
-        } else if (data.type === 'final') {
-          setInterimText('')
-          addTranscriptBlock(data.text, videoTimeRef.current)
-        }
-      }
+      ws.onmessage = handleServerMessage
 
       ws.onerror = () => {
         setTranscriptionError('Could not connect to Python server at 127.0.0.1:5000. Is it running?')
@@ -135,12 +184,13 @@ export default function Toolbar({ showToast }) {
       }
 
       ws.onclose = () => {
-        if (transcription.isActive) {
+        // Only auto-stop if we haven't already intentionally stopped
+        if (wsRef.current !== null) {
           stopSpeechRecognition()
         }
       }
 
-      // 5. Stream raw audio to server
+      // 6. Stream raw audio to server
       const processor = audioCtx.createScriptProcessor(4096, 1, 1)
       processor.onaudioprocess = (e) => {
         if (ws.readyState === WebSocket.OPEN) {

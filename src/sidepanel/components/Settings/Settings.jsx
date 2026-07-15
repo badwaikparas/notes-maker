@@ -19,13 +19,20 @@ export default function Settings() {
   const updateSettings = useNotesStore((s) => s.updateSettings)
   const [currentShortcut, setCurrentShortcut] = useState('Ctrl+Shift+S')
 
+  // Read the actual shortcut from Chrome and update on every visit to this tab
   useEffect(() => {
-    chrome.commands.getAll((commands) => {
-      const screenshotCommand = commands.find(c => c.name === 'take-screenshot')
-      if (screenshotCommand && screenshotCommand.shortcut) {
-        setCurrentShortcut(screenshotCommand.shortcut)
-      }
-    })
+    function fetchShortcut() {
+      chrome.commands.getAll((commands) => {
+        const screenshotCommand = commands.find(c => c.name === 'take-screenshot')
+        if (screenshotCommand?.shortcut) {
+          setCurrentShortcut(screenshotCommand.shortcut)
+        }
+      })
+    }
+    fetchShortcut()
+    // Re-poll every 3 s so changes made in chrome://extensions/shortcuts reflect quickly
+    const id = setInterval(fetchShortcut, 3000)
+    return () => clearInterval(id)
   }, [])
 
   function toggle(key) {
@@ -55,9 +62,10 @@ export default function Settings() {
           </SettingRow>
 
           <div className="settings-info-box">
-            <strong>How it works:</strong> Click <em>Record</em> in the header. The browser will ask for microphone
-            permission. The mic picks up audio playing from your speakers. For best results, use speakers (not headphones)
-            or set your OS to route system audio to the microphone input.
+            <strong>How it works:</strong> Click <em>Record</em> in the header. A screen-share prompt
+            will appear — select the tab you want to transcribe and check <strong>Share tab audio</strong>.
+            The local Whisper server at <code>ws://127.0.0.1:5000</code> will receive the audio and
+            return line-by-line transcripts. Transcription continues even if the sidebar is collapsed.
           </div>
         </section>
 
@@ -67,10 +75,10 @@ export default function Settings() {
 
           <SettingRow
             label="Shortcut"
-            desc="Chrome requires this to be changed in settings"
+            desc={<>Current shortcut — change in <strong>chrome://extensions/shortcuts</strong>, it will reflect here automatically</>}
           >
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <kbd className="shortcut-badge">{currentShortcut}</kbd>
+              <kbd className="shortcut-badge">{currentShortcut || '(none)'}</kbd>
               <button 
                 className="btn-icon" 
                 title="Edit Shortcut" 
@@ -84,7 +92,7 @@ export default function Settings() {
 
           <SettingRow
             label="Auto-add to Notes"
-            desc="Automatically include screenshots in your notes document"
+            desc="Automatically include screenshots in your notes document when taken"
           >
             <Toggle
               checked={settings.autoAddScreenshotsToNotes}
@@ -92,25 +100,27 @@ export default function Settings() {
               id="toggle-auto-screenshot"
             />
           </SettingRow>
+
+          <SettingRow
+            label="Delete from gallery on notes removal"
+            desc="When a screenshot is removed from Notes, also delete it from the Screenshots gallery"
+          >
+            <Toggle
+              checked={settings.deleteScreenshotFromGalleryOnNotesRemoval ?? false}
+              onChange={() => toggle('deleteScreenshotFromGalleryOnNotesRemoval')}
+              id="toggle-delete-screenshot-on-remove"
+            />
+          </SettingRow>
         </section>
 
         {/* ── Notes ── */}
         <section className="settings-section">
-          <h3 className="settings-section-title">📝 Notes & Export</h3>
+          <h3 className="settings-section-title">📝 Notes</h3>
 
-          <SettingRow
-            label="Heading Level"
-            desc="Level used when adding headings to notes"
-          >
-            <select
-              value={settings.noteHeadingLevel}
-              onChange={(e) => updateSettings({ noteHeadingLevel: e.target.value })}
-            >
-              <option value="h1">H1</option>
-              <option value="h2">H2 (default)</option>
-              <option value="h3">H3</option>
-            </select>
-          </SettingRow>
+          <div className="settings-info-box">
+            Double-click any block in the Notes tab to edit it as Markdown. Use the <strong>📥 Add All Lines</strong>
+            button to bulk-add all transcript sentences to your notes. Toggle between rendered preview and raw markdown with the &lt;/&gt; button.
+          </div>
         </section>
 
         {/* ── Auto-save ── */}
@@ -144,7 +154,9 @@ export default function Settings() {
             <KbdRow keys={['Click']}             action="Copy sentence to clipboard" />
             <KbdRow keys={['Shift', 'Click']}     action="Select a range of sentences" />
             <KbdRow keys={['Ctrl', 'Click']}      action="Toggle checkbox on sentence" />
-            <KbdRow keys={['Ctrl+Shift+S']}       action="Capture screenshot" />
+            <KbdRow keys={['Double-click']}        action="Edit a note block" />
+            <KbdRow keys={['Ctrl+Enter']}          action="Save note edit" />
+            <KbdRow keys={[currentShortcut || 'Ctrl+Shift+S']} action="Capture screenshot" />
           </div>
         </section>
 

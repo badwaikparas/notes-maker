@@ -3,17 +3,15 @@ import { useNotesStore } from '../../store/useNotesStore'
 import { formatTime } from '../../utils/markdownExporter'
 import './TranscriptPanel.css'
 
-export default function TranscriptSentence({ block, index, anchoredScreenshots, showToast }) {
+export default function TranscriptSentence({ block, index, showToast }) {
   const selectedIds    = useNotesStore((s) => s.selectedIds)
   const toggleSelect   = useNotesStore((s) => s.toggleSelect)
   const selectRange    = useNotesStore((s) => s.selectRange)
   const toggleInNotes  = useNotesStore((s) => s.toggleInNotes)
-  const updateCaption  = useNotesStore((s) => s.updateCaption)
   const deleteBlock    = useNotesStore((s) => s.deleteBlock)
 
-  const [hovered, setHovered]             = useState(false)
-  const [copyFlash, setCopyFlash]         = useState(false)
-  const [editingCaption, setEditingCaption] = useState(null) // screenshot id
+  const [hovered, setHovered]     = useState(false)
+  const [copyFlash, setCopyFlash] = useState(false)
 
   const isSelected = selectedIds.has(block.id)
 
@@ -91,63 +89,6 @@ export default function TranscriptSentence({ block, index, anchoredScreenshots, 
           <span className="sentence-checkbox">✓</span>
         )}
       </div>
-
-      {/* ── Inline anchored screenshots ── */}
-      {anchoredScreenshots.map((ss) => (
-        <div key={ss.id} className="inline-screenshot animate-fade-in">
-          <div className="inline-screenshot-header">
-            <span className="inline-screenshot-label">
-              📸 Screenshot {ss.timestamp !== null ? `· ${formatTime(ss.timestamp)}` : ''}
-              {ss.addedToNotes && <span className="in-notes-dot" title="In notes" style={{ display: 'inline-block', marginLeft: '6px', marginTop: 0, verticalAlign: 'middle' }} />}
-            </span>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <button
-                className="btn-icon"
-                title={ss.addedToNotes ? 'Remove from notes' : 'Add to notes'}
-                onClick={() => toggleInNotes(ss.id)}
-              >
-                {ss.addedToNotes ? '✅' : '📝'}
-              </button>
-              <button
-                className="btn-icon"
-                onClick={() => deleteBlock(ss.id)}
-                title="Delete screenshot"
-              >
-                🗑️
-              </button>
-            </div>
-          </div>
-          <img
-            src={ss.imageDataUrl}
-            alt="Screenshot"
-            className="inline-screenshot-img"
-          />
-          {editingCaption === ss.id ? (
-            <input
-              className="caption-input"
-              type="text"
-              placeholder="Add caption…"
-              defaultValue={ss.caption}
-              autoFocus
-              onBlur={(e) => {
-                updateCaption(ss.id, e.target.value)
-                setEditingCaption(null)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.target.blur()
-                if (e.key === 'Escape') setEditingCaption(null)
-              }}
-            />
-          ) : (
-            <button
-              className="caption-btn"
-              onClick={() => setEditingCaption(ss.id)}
-            >
-              {ss.caption || '+ Add caption'}
-            </button>
-          )}
-        </div>
-      ))}
     </div>
   )
 }
