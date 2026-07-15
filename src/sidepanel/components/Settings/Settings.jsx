@@ -56,13 +56,15 @@ export default function Settings() {
           </SettingRow>
 
           <div className="settings-info-box">
-            <strong>How it works:</strong> Click <em>Record</em> in the header. A screen-share
-            prompt will appear — pick the tab you want to transcribe and tick{' '}
-            <strong>Share tab audio</strong>. Audio is streamed to your local Whisper server at{' '}
-            <code>ws://127.0.0.1:5000</code>. If the server is not running you'll see a clear
-            error <em>before</em> the screen-share prompt.
+            <strong>How it works:</strong> Click <em>Record</em> in the header. A tab picker will appear
+            — select the tab you want to transcribe. Audio is streamed to your local Whisper server at{' '}
+            <code>ws://127.0.0.1:5000</code>.<br /><br />
+            <strong>💡 Tip — record before pressing Play:</strong> Tab capture works even when the video
+            is paused or hasn't started yet. Start recording first, then press Play on the video — you
+            won't miss the beginning. Whisper simply stays silent until audio begins.
           </div>
         </section>
+
 
         {/* ── Screenshots ── */}
         <section className="settings-section">

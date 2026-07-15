@@ -93,23 +93,31 @@ export default function Toolbar({ showToast }) {
       return
     }
 
-    // Step 2: Show desktop picker (includes current tab) via background desktopCapture.
-    // desktopCapture.chooseDesktopMedia shows ALL tabs including the current one,
-    // unlike getDisplayMedia which always excludes the current tab.
+    // Step 2: Show desktop capture picker via background.
+    // chooseDesktopMedia shows ALL tabs including the current one.
+    // Tab capture works even before the video is playing — it captures all tab
+    // audio output, so starting the recording before pressing Play is fine.
     let stream
     try {
-      showToast('Select the tab to transcribe in the picker...')
+      showToast('A tab picker will appear — select the tab you want to transcribe', 4000)
       const resp = await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Picker timed out or was cancelled.')), 60000)
+        const timer = setTimeout(() => reject(new Error('Picker timed out. Try again.')), 120000)
         chrome.runtime.sendMessage({ type: 'REQUEST_TAB_AUDIO_STREAM' }, (r) => {
           clearTimeout(timer)
-          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message))
-          else if (r?.error) reject(new Error(r.error))
-          else resolve(r)
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message))
+          resolve(r)  // always resolve — check cancelled below
         })
       })
 
-      // desktopCapture returns a 'desktop' source streamId
+      // User closed the picker without selecting — soft dismiss, not an error
+      if (resp?.cancelled) {
+        showToast('Tab not selected — click Record to try again')
+        return
+      }
+
+      if (resp?.error) throw new Error(resp.error)
+
+      // desktopCapture uses chromeMediaSource: 'desktop'
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           mandatory: {

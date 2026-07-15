@@ -68,25 +68,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
-  // Tab audio capture.
-  // chrome.tabCapture.getMediaStreamId fails with "Extension has not been invoked"
-  // when called from a MV3 service worker without an active-tab user gesture.
-  // chrome.desktopCapture.chooseDesktopMedia is reliable, works from service workers,
-  // and — unlike getDisplayMedia — DOES show the current tab in the picker.
+  // Tab audio capture via desktopCapture.
+  // We pass the active tab as targetTab so Chrome attaches the picker dialog
+  // to the correct Chrome window (without this, the dialog may appear off-screen
+  // or fail silently when called from a service worker).
   if (message.type === 'REQUEST_TAB_AUDIO_STREAM') {
-    chrome.desktopCapture.chooseDesktopMedia(
-      ['tab', 'audio'],
-      null,
-      (streamId) => {
-        if (!streamId) {
-          sendResponse({ error: 'Screen picker was cancelled.' })
-        } else {
-          sendResponse({ streamId })
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      chrome.desktopCapture.chooseDesktopMedia(
+        ['tab', 'audio'],
+        tab ?? null,     // targetTab — attaches picker to this window
+        (streamId) => {
+          if (!streamId) {
+            // Empty streamId = user closed/cancelled the picker (not a hard error)
+            sendResponse({ cancelled: true })
+          } else {
+            sendResponse({ streamId })
+          }
         }
-      }
-    )
+      )
+    })
     return true  // async
   }
+
 
 
   // Relay minimize command from iframe back to the host tab's content script
